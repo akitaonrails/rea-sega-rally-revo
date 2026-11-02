@@ -438,3 +438,45 @@ prefix, `--setup` from the owner's full rip, gamescope headless 1920x1080,
 - Non-empty saves are left alone: covered by the host test
   `the_old_empty_seeds_go_and_real_saves_stay`. The real non-empty saves
   above were kept across the second and third launches.
+
+## 2026-11-02 — rea-launcher-sdk v0.3.3: per-exe DLL overrides (bundled DLLs proven native)
+
+Same headless harness. The prefix was made new for the save-file check;
+Microsoft's DirectX package was downloaded into it with
+`--download-directx`, and `--setup --linux` put the 22 D3DX9/D3DCompiler
+DLLs into the private copy. Every run started from `env -i` with no
+`WINEDLLOVERRIDES`, under `WINEDEBUG=+loaddll`. Logs are in
+`.work/realgame/logs/dx-*.log`.
+
+**Why `d3dx9_35` was builtin before.** It was not an inherited
+`WINEDLLOVERRIDES`: the environment held none, and `[Software\Wine\DllOverrides]`
+was empty in both prefixes. The DLL was where the game loads it from
+(the private copy, the game's folder). `WINEDEBUG=+module` shows the
+reason (`dx-why.log`): `version_heuristics got default vendor "Microsoft
+Corporation"` for the copy's `d3dx9_35.dll`, then `find_builtin_dll`. With
+no explicit override, Wine's loader replaces a DLL whose version resource
+names Microsoft as the vendor with its own builtin, even from the program
+folder. DXVK's `d3d9.dll` (not Microsoft's) does win from the program
+folder by default. That is why `d3d9` was native and `d3dx9_35` builtin.
+On top of that, the launcher's `WINEDLLOVERRIDES` never reached the game
+(SDK v0.3.3: Wine ignores it in a child's environment block), so nothing
+overrode the vendor rule.
+
+| Run | `d3d9.dll` | `d3dx9_35.dll` |
+| --- | --- | --- |
+| Before: the game started directly, no override (`dx-before.log`) | native (copy, DXVK) | **builtin** |
+| Before: the v0.3.2 launcher, env override only (`dx-launcher.log`, `dx-desktop.log`, first prefix) | native (copy) | **builtin** |
+| After: `wine SRRLauncher.exe --no-window`, plain Wine, no `--linux` (`dx-after-plain.log`) | builtin (system32; no DXVK of ours without `--linux`) | **native** (copy) |
+| After: `wine SRRLauncher.exe --no-window --linux` (`dx-after-linux.log`) | native (copy, DXVK) | **native** (copy) |
+| After: `srr-play --play` (`dx-after-srrplay.log`) | native (copy, DXVK) | **native** (copy) |
+
+`launcher.log` after: `wine: per-exe DLL overrides for SEGA Rally_SSE1.exe
+(native,builtin): written [...]`, then `already ours [...]` on the next
+launch. The game loads only `d3dx9_35` of the D3DX9 set. In every "after"
+run it kept running until the supervisor closed it (taskkill, or `srr-play
+stop`); everything was gone in under 1 s.
+
+This settles bug 2 of the verification entry above. The Wine-side
+registry round trip (ours written, the player's value kept, ours taken
+back) is covered by `tests/wine_app_overrides.rs` under
+`sdk/scripts/wine-test`.
