@@ -37,7 +37,7 @@ loading wait is cut out).*
 
 | Play | Picture | Controls |
 | --- | --- | --- |
-| ![The Play tab on a first run: the game folder field, the four looks and the stutter fix](docs/images/launcher-play.jpg) | ![The Picture tab: resolution chips, what the game will run at, quality and vsync](docs/images/launcher-picture.jpg) | ![The Controls tab: pad status, the force-feedback warning and the Test rumble button](docs/images/launcher-controls.jpg) |
+| ![The Play tab with the game folder found (both v4.0.6.0 executables), the four looks and the stutter fix](docs/images/launcher-play.jpg) | ![The Picture tab: resolution chips, what the game will run at, quality and vsync](docs/images/launcher-picture.jpg) | ![The Controls tab: pad status, the force-feedback warning and the Test rumble button](docs/images/launcher-controls.jpg) |
 
 ## What you need
 
