@@ -2,8 +2,9 @@
 //! its first Win32 call: GNU ld left some import address table slots outside
 //! every import descriptor, so the loader never resolved them.
 //!
-//! `SRR_LAUNCHER_EXE=target/i686-pc-windows-gnu/release/SRRLauncher.exe
-//! cargo test --test imports -- --ignored`
+//! `SRR_LAUNCHER_EXE="$PWD/target/i686-pc-windows-gnu/release/SRRLauncher.exe"
+//! cargo test --test imports -- --ignored` (absolute path: tests run from
+//! the crate folder)
 
 use std::collections::BTreeSet;
 

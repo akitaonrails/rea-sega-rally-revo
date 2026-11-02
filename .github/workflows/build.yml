@@ -50,7 +50,7 @@ jobs:
         run: cargo build --release --target i686-pc-windows-gnu --workspace
 
       - name: Every import of SRRLauncher.exe is resolvable
-        run: SRR_LAUNCHER_EXE=target/i686-pc-windows-gnu/release/SRRLauncher.exe cargo test --test imports -- --ignored
+        run: SRR_LAUNCHER_EXE="$PWD/target/i686-pc-windows-gnu/release/SRRLauncher.exe" cargo test --test imports -- --ignored
 
       - name: Package (including pinned DXVK)
         run: |
