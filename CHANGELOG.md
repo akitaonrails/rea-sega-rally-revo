@@ -3,6 +3,10 @@
 ## Unreleased
 
 - Updated rea-launcher-sdk to v0.3.2.
+- Options also take `--flag=value` (`--vsync=on`), and a flag spelled with
+  an underscore works too (`--stutter_fix off`, `--frame_limit 60`), as
+  the keys are spelled in `launcher.cfg`. Switches such as `--no-window`
+  refuse a value.
 - **Errors reach the player under Wine and Proton.** An error that stops
   the launcher (wrong game folder, unknown game version, a failed setup)
   now always shows a message box when you started it, and is printed too,

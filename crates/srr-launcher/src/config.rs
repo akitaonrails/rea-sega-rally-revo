@@ -508,6 +508,19 @@ mod tests {
     }
 
     #[test]
+    fn flags_take_equals_underscores_and_any_case() {
+        // SDK v0.3.2: `--flag=value`, `--stutter_fix` for `--stutter-fix`.
+        let cli = args(&["--stutter_fix=OFF", "--vsync=On", "--quality", "HIGH"]).unwrap();
+        assert_eq!(cli.settings.stutter_fix, Some(false));
+        assert_eq!(cli.settings.vsync, Some(true));
+        assert_eq!(cli.settings.quality, Some(Quality::High));
+        assert!(args(&["--vsync=maybe"]).unwrap_err().contains("--vsync"));
+        // A switch never takes a value.
+        assert!(args(&["--no-window=1"]).is_err());
+        assert_eq!(args(&["--no-window"]).unwrap().switches, ["--no-window"]);
+    }
+
+    #[test]
     fn defaults_are_the_recommended_setup() {
         let settings = Settings::default();
         assert_eq!(
