@@ -268,8 +268,13 @@ impl<'a> Window<'a> {
         matches!(self.check, Check::Found { .. })
     }
 
-    fn pacer_available(&self) -> bool {
-        matches!(self.check, Check::Found { pacer: true, .. })
+    /// `None` before a usable folder is chosen, else whether it holds the
+    /// clean SSE1 exe the stutter fix needs.
+    fn folder_has_pacer(&self) -> Option<bool> {
+        match self.check {
+            Check::Found { pacer, .. } => Some(pacer),
+            _ => None,
+        }
     }
 
     fn play(&mut self, ctx: &egui::Context) {
@@ -568,14 +573,14 @@ impl Window<'_> {
         ui.add_space(14.0);
 
         heading(ui, "Timing");
-        let pacer = self.pacer_available();
+        let stutter_fix_disabled = form::stutter_fix_disabled(self.folder_has_pacer());
         ui.horizontal_top(|ui| {
             field(ui, "Stutter fix");
             chips(
                 ui,
                 &[(true, "On (recommended)"), (false, "Off")],
                 &mut self.form.stutter_fix,
-                pacer,
+                stutter_fix_disabled,
             );
         });
         let folder_lacks_pacer = matches!(self.check, Check::Found { pacer: false, .. });
@@ -605,7 +610,7 @@ impl Window<'_> {
                 ui,
                 &FrameLimit::ALL.map(|limit| (limit, limit.label())),
                 &mut self.form.frame_limit,
-                self.dxvk,
+                form::frame_limit_disabled(self.dxvk),
             );
         });
         ui.label(
@@ -628,7 +633,7 @@ impl Window<'_> {
                 .iter()
                 .map(|language| ((*language).to_string(), *language))
                 .collect();
-            chips(ui, &options, &mut self.form.language, true);
+            chips(ui, &options, &mut self.form.language, None);
         });
     }
 
@@ -643,10 +648,10 @@ impl Window<'_> {
             });
         };
         row(ui, "Resolution", &mut |ui| {
-            chips(ui, resolutions, &mut picture.resolution, true)
+            chips(ui, resolutions, &mut picture.resolution, None)
         });
         row(ui, "Aspect", &mut |ui| {
-            chips(ui, &form::ASPECTS, &mut picture.aspect, true)
+            chips(ui, &form::ASPECTS, &mut picture.aspect, None)
         });
         ui.label(
             egui::RichText::new(
@@ -661,7 +666,7 @@ impl Window<'_> {
                 ui,
                 &Quality::ALL.map(|quality| (quality, quality.label())),
                 &mut picture.quality,
-                true,
+                None,
             )
         });
         row(ui, "", &mut |ui| {
@@ -867,12 +872,16 @@ fn outline_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// A row of choice chips. `disabled` holds the reason when the whole row
+/// cannot be changed: the chips then ignore clicks, show the reason on
+/// hover, and still outline the saved value so it stays visible.
 fn chips<T: PartialEq + Clone, S: AsRef<str>>(
     ui: &mut egui::Ui,
     options: &[(T, S)],
     current: &mut T,
-    enabled: bool,
+    disabled: Option<&str>,
 ) {
+    let enabled = disabled.is_none();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         for (value, label) in options {
@@ -886,7 +895,7 @@ fn chips<T: PartialEq + Clone, S: AsRef<str>>(
             };
             let galley = ui.painter().layout_no_wrap(
                 label.as_ref().to_string(),
-                if on && enabled {
+                if on {
                     named("barlow-semibold", 14.0)
                 } else {
                     font(14.0)
@@ -894,7 +903,12 @@ fn chips<T: PartialEq + Clone, S: AsRef<str>>(
                 text_color,
             );
             let size = vec2(galley.size().x + 24.0, 30.0);
-            let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+            let sense = if enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            };
+            let (rect, response) = ui.allocate_exact_size(size, sense);
             let fill = if !enabled {
                 Color32::TRANSPARENT
             } else if on {
@@ -904,28 +918,26 @@ fn chips<T: PartialEq + Clone, S: AsRef<str>>(
             } else {
                 Color32::TRANSPARENT
             };
+            let stroke = match (enabled, on) {
+                (false, true) => ORANGE.gamma_multiply(0.5),
+                (false, false) => LINE.gamma_multiply(0.5),
+                (true, true) => ORANGE,
+                (true, false) => LINE,
+            };
             ui.painter().rect(
                 rect,
                 CornerRadius::same(6),
                 fill,
-                Stroke::new(
-                    1.0,
-                    if !enabled {
-                        LINE.gamma_multiply(0.5)
-                    } else if on {
-                        ORANGE
-                    } else {
-                        LINE
-                    },
-                ),
+                Stroke::new(1.0, stroke),
                 StrokeKind::Inside,
             );
             ui.painter()
                 .galley(rect.center() - galley.size() / 2.0, galley, INK);
-            if enabled
-                && response
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .clicked()
+            if let Some(reason) = disabled {
+                response.on_hover_text(reason);
+            } else if response
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
             {
                 *current = value.clone();
             }

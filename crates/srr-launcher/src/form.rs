@@ -169,6 +169,22 @@ impl Form {
     }
 }
 
+/// Why the stutter-fix chips are disabled, if they are: `folder` is
+/// `None` before a usable game folder is chosen, else whether it holds the
+/// clean SSE1 exe the pacer patch needs.
+pub fn stutter_fix_disabled(folder: Option<bool>) -> Option<&'static str> {
+    match folder {
+        None => Some("Choose the game folder first."),
+        Some(false) => Some("Needs the clean SEGA Rally_SSE1.exe in the game folder."),
+        Some(true) => None,
+    }
+}
+
+/// Why the frame-limit chips are disabled, if they are.
+pub fn frame_limit_disabled(dxvk: bool) -> Option<&'static str> {
+    (!dxvk).then_some("Needs DXVK: Linux, Wine or Proton. On Windows the game follows vsync.")
+}
+
 pub const WINDOW: (f32, f32) = (880.0, 640.0);
 
 pub fn window_zoom(screen: Option<(u32, u32)>, native: f32) -> f32 {
@@ -381,6 +397,19 @@ mod tests {
         let mut form = Form::first_run(SCREEN);
         form.picture.quality = Quality::Ultra;
         assert_eq!(Form::look_of(&form.picture, SCREEN), Look::Custom);
+    }
+
+    #[test]
+    fn disabled_chips_say_why() {
+        assert!(stutter_fix_disabled(None).unwrap().contains("game folder"));
+        assert!(
+            stutter_fix_disabled(Some(false))
+                .unwrap()
+                .contains("SEGA Rally_SSE1.exe")
+        );
+        assert_eq!(stutter_fix_disabled(Some(true)), None);
+        assert!(frame_limit_disabled(false).unwrap().contains("DXVK"));
+        assert_eq!(frame_limit_disabled(true), None);
     }
 
     #[test]

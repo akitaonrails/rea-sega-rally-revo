@@ -52,6 +52,9 @@
   pinned v3.1.1 commit and checked against its SHA-256, the DXVK folder is
   derived from `packaging/dxvk.txt` instead of hard-coded, and releases
   carry a `SHA256SUMS` file.
+- Disabled choice chips (stutter fix without the clean exe or before a
+  folder is chosen, frame limit on native Windows) still outline the saved
+  value and say why on hover.
 
 ## v0.1.1 - 2026-11-02
 

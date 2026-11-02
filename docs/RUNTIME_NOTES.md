@@ -183,3 +183,6 @@ was exercised against the real game yet:
   isolated desktop's explorer). Check in `launcher.log` and DXVK's log that
   DXVK 3.1.1 still loads and picks the dGPU through srr-play and the
   AppImage.
+- **Disabled chips** now outline the saved value and show a hover reason;
+  not yet seen in the real window (capture the Play tab on native Windows
+  or with a folder that lacks the clean SSE1 exe).
