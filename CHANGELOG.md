@@ -36,6 +36,8 @@
   is seeded now; an unreadable one is left alone, and the file is edited
   byte for byte, so names in any encoding survive. A UTF-8 byte-order mark
   no longer hides `[Graphics]` on the first line, and is kept.
+- On Windows, replacing `config.ini` retries for half a second when
+  antivirus or OneDrive briefly holds the file.
 - The stutter fix checks its result against the known patched SHA-256
   before writing the private exe, and refuses (writing nothing) on a
   mismatch.

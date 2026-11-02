@@ -153,9 +153,34 @@ pub fn write_atomic(path: &std::path::Path, text: impl AsRef<[u8]>) -> std::io::
     temp.push(".srr-tmp");
     let temp = std::path::PathBuf::from(temp);
     std::fs::write(&temp, text)?;
-    std::fs::rename(&temp, path).inspect_err(|_| {
+    // Windows: antivirus or OneDrive can hold the file for a moment.
+    let attempts = if cfg!(windows) { 5 } else { 1 };
+    retry_denied(attempts, std::time::Duration::from_millis(100), || {
+        std::fs::rename(&temp, path)
+    })
+    .inspect_err(|_| {
         let _ = std::fs::remove_file(&temp);
     })
+}
+
+/// Runs `step` up to `attempts` times while it fails with
+/// `PermissionDenied`, sleeping `delay` between tries; any other result is
+/// returned at once.
+fn retry_denied(
+    attempts: u32,
+    delay: std::time::Duration,
+    mut step: impl FnMut() -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let mut left = attempts.max(1);
+    loop {
+        left -= 1;
+        match step() {
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied && left > 0 => {
+                std::thread::sleep(delay);
+            }
+            result => return result,
+        }
+    }
 }
 
 /// Full config.ini for a first run (no file exists yet).
@@ -436,6 +461,37 @@ mod tests {
             String::from_utf8_lossy(&out).matches("[Graphics]").count(),
             1
         );
+    }
+
+    #[test]
+    fn a_denied_rename_is_retried_a_few_times() {
+        use std::io::{Error, ErrorKind};
+        let no_wait = std::time::Duration::ZERO;
+        let mut calls = 0;
+        let ok = retry_denied(5, no_wait, || {
+            calls += 1;
+            if calls < 3 {
+                Err(Error::from(ErrorKind::PermissionDenied))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(ok.is_ok());
+        assert_eq!(calls, 3);
+        calls = 0;
+        let denied = retry_denied(5, no_wait, || {
+            calls += 1;
+            Err(Error::from(ErrorKind::PermissionDenied))
+        });
+        assert_eq!(denied.unwrap_err().kind(), ErrorKind::PermissionDenied);
+        assert_eq!(calls, 5);
+        calls = 0;
+        let other = retry_denied(5, no_wait, || {
+            calls += 1;
+            Err(Error::from(ErrorKind::NotFound))
+        });
+        assert_eq!(other.unwrap_err().kind(), ErrorKind::NotFound);
+        assert_eq!(calls, 1, "only PermissionDenied is retried");
     }
 
     #[test]
