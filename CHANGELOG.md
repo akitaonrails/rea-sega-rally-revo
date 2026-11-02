@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 - 2026-11-02
 
 - **The stutter fix is now our own clean-room implementation.** It was
   written from a specification of what the fix must do and the game's own
