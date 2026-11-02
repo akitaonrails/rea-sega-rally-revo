@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Sega Rally Revo Launcher
+Comment=Play your own Sega Rally Revo (2007) with modern compatibility fixes
+Exec=srr-play
+Icon=srr-launcher
+Terminal=false
+Categories=Game;

@@ -1,0 +1,8 @@
+#!/bin/sh
+HERE=$(dirname "$(readlink -f "$0")")
+export PATH="$HERE/usr/lib/wine/bin:$PATH"
+export SRR_LAUNCHER="$HERE/usr/lib/srr/SRRLauncher.exe"
+export SRR_WAIT=1
+export WINEDLLOVERRIDES="mscoree,mshtml=${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
+export WINEDEBUG="${WINEDEBUG:--all}"
+exec "$HERE/usr/lib/srr/srr-play" "$@"

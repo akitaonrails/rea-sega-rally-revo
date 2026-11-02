@@ -1,0 +1,113 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-binaries:
+    name: Test and build the Windows and Linux packages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the 32-bit MinGW toolchain and LLD
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-i686 lld zip
+
+      - name: Install Rust (with the 32-bit Windows target)
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup target add i686-pc-windows-gnu
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Unit tests (host)
+        run: cargo test --workspace
+
+      - name: Install dependency audit tools
+        run: cargo install --locked cargo-audit cargo-deny
+
+      - name: Dependency advisories, licenses, and sources
+        run: cargo audit && cargo deny check
+
+      - name: Linux helper tests (GPU choice, config keys, game detection)
+        run: sh linux/tests/gpu-env.sh && sh linux/tests/config-keys.sh && sh linux/tests/game-alive.sh
+
+      - name: Shell syntax
+        run: sh -n linux/srr-play packaging/appimage/AppRun packaging/appimage/build.sh
+
+      - name: Lint (Windows target)
+        run: cargo clippy --release --target i686-pc-windows-gnu --workspace -- -D warnings
+
+      - name: Build SRRLauncher.exe
+        run: cargo build --release --target i686-pc-windows-gnu --workspace
+
+      - name: Every import of SRRLauncher.exe is resolvable
+        run: SRR_LAUNCHER_EXE=target/i686-pc-windows-gnu/release/SRRLauncher.exe cargo test --test imports -- --ignored
+
+      - name: Package (including pinned DXVK)
+        run: |
+          name=SRRLauncher-${GITHUB_REF_NAME//\//-}
+          mkdir -p "dist/$name"
+          cp target/i686-pc-windows-gnu/release/SRRLauncher.exe \
+             README.md THIRD_PARTY.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cp -r linux "dist/$name/linux"
+          read -r url digest < <(grep -v '^#' packaging/dxvk.txt)
+          curl -fsSL "$url" -o dxvk.tar.gz
+          echo "$digest  dxvk.tar.gz" | sha256sum -c -
+          tar -xOf dxvk.tar.gz dxvk-3.1.1/x32/d3d9.dll > "dist/$name/linux/d3d9.dll"
+          curl -fsSL https://raw.githubusercontent.com/doitsujin/dxvk/v3.1.1/LICENSE -o "dist/$name/linux/dxvk-LICENSE"
+          chmod +x "dist/$name/linux/srr-play"
+          (cd dist && zip -r "$name.zip" "$name")
+          echo "PACKAGE=dist/$name.zip" >> "$GITHUB_ENV"
+          echo "PACKAGE_DIR=dist/$name" >> "$GITHUB_ENV"
+          echo "APPIMAGE=dist/$name-x86_64.AppImage" >> "$GITHUB_ENV"
+
+      - name: Build the Linux AppImage (with portable Wine)
+        run: |
+          packaging/appimage/build.sh "$PACKAGE_DIR" dist/appimage
+          mv dist/appimage/SRRLauncher-x86_64.AppImage "$APPIMAGE"
+
+      - name: Check the AppImage DXVK layout
+        run: |
+          "$APPIMAGE" --appimage-extract >/dev/null
+          test -f squashfs-root/usr/lib/srr/linux/d3d9.dll
+          rm -rf squashfs-root
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SRRLauncher-windows
+          path: ${{ env.PACKAGE }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SRRLauncher-linux
+          path: ${{ env.APPIMAGE }}
+
+  release:
+    name: Publish a release for version tags
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows-binaries
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: SRRLauncher-*
+          merge-multiple: true
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          awk 'BEGIN { take = 0 } /^## v/ { if (take) exit; take = 1; next } take { print }' CHANGELOG.md > release-notes.md
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-file release-notes.md ./*.zip ./*.AppImage

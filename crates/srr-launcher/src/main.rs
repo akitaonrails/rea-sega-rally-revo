@@ -1,0 +1,496 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
+#[cfg(windows)]
+mod ui;
+#[cfg(windows)]
+mod win32;
+
+#[cfg(windows)]
+fn main() {
+    let code = match app::run() {
+        Ok(code) => code,
+        Err(error) => {
+            app::log_line(&format!("error: {error}"));
+            win32::message("Sega Rally Revo launcher", &error, true);
+            1
+        }
+    };
+    std::process::exit(code as i32);
+}
+
+#[cfg(not(windows))]
+fn main() {
+    eprintln!("SRRLauncher is a Windows program; on Linux run it with Proton, Wine, or srr-play.");
+    std::process::exit(2);
+}
+
+#[cfg(windows)]
+mod app {
+    use std::fs;
+    use std::io::Write as _;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    use srr_launcher::config::{self, Settings};
+    use srr_launcher::edition;
+    use srr_launcher::form::Picture;
+    use srr_launcher::gamecfg;
+    use srr_launcher::{display, patches, runtime};
+
+    use crate::{ui, win32};
+
+    const DXVK_MARKER: &str = ".srr-dxvk";
+
+    fn home() -> PathBuf {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("SRRLauncher")
+    }
+
+    pub fn log_line(line: &str) {
+        let dir = home();
+        let _ = fs::create_dir_all(&dir);
+        if let Ok(mut file) = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("launcher.log"))
+        {
+            let _ = writeln!(file, "{line}");
+        }
+    }
+
+    fn settings_path() -> PathBuf {
+        let portable = std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(|dir| dir.join(config::FILE_NAME)));
+        match portable {
+            Some(path) if path.is_file() => path,
+            _ => home().join(config::FILE_NAME),
+        }
+    }
+
+    fn find_game(settings: &Settings) -> Result<PathBuf, String> {
+        if let Some(game) = &settings.game {
+            return Ok(game.clone());
+        }
+        if let Some(dir) = std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            && (dir.join(edition::MAIN_EXE).is_file() || dir.join(edition::SSE1_EXE).is_file())
+        {
+            return Ok(dir);
+        }
+        Err(format!(
+            "Choose the folder containing SEGA Rally.exe or {}, or run:\n\nSRRLauncher --game <folder>",
+            edition::SSE1_EXE
+        ))
+    }
+
+    fn take_flag(args: &mut Vec<String>, flag: &str) -> bool {
+        let found = args.iter().any(|arg| arg == flag);
+        args.retain(|arg| arg != flag);
+        found
+    }
+
+    fn launcher_dir() -> Option<PathBuf> {
+        std::env::current_exe()
+            .ok()?
+            .parent()
+            .map(Path::to_path_buf)
+    }
+
+    /// Copy the bundled DXVK d3d9.dll next to the runtime exe (Linux only).
+    fn configure_dxvk(runtime: &Path, linux: bool) -> Result<(), String> {
+        let marker = runtime.join(DXVK_MARKER);
+        let destination = runtime.join("d3d9.dll");
+        if !linux {
+            if marker.is_file() {
+                let _ = fs::remove_file(destination);
+                let _ = fs::remove_file(marker);
+            }
+            return Ok(());
+        }
+        let source = launcher_dir()
+            .map(|dir| dir.join("linux").join("d3d9.dll"))
+            .ok_or("cannot locate the launcher folder")?;
+        if !source.is_file() {
+            return Err(format!(
+                "DXVK is missing: {}. Keep the linux folder next to SRRLauncher.exe.",
+                source.display()
+            ));
+        }
+        let same = fs::read(&source)
+            .ok()
+            .zip(fs::read(&destination).ok())
+            .is_some_and(|(a, b)| a == b);
+        if !same {
+            fs::copy(&source, &destination)
+                .map_err(|error| format!("cannot install DXVK into the runtime: {error}"))?;
+        }
+        fs::write(marker, b"d3d9.dll is managed by SRRLauncher\n")
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn read_exe(dir: &Path, name: &str) -> Option<Vec<u8>> {
+        fs::read(dir.join(name)).ok()
+    }
+
+    fn write_exe(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
+        fs::write(dir.join(name), bytes)
+            .map_err(|error| format!("cannot write the private copy of {name}: {error}"))
+    }
+
+    const WINDOW_CLOSED: u32 = 3;
+    const WINDOW_UNAVAILABLE: u32 = 4;
+
+    pub fn run() -> Result<u32, String> {
+        log_line(concat!("SRRLauncher ", env!("CARGO_PKG_VERSION")));
+        let settings_path = settings_path();
+        let mut cli: Vec<String> = std::env::args().skip(1).collect();
+        if take_flag(&mut cli, "--help") {
+            win32::message("Sega Rally Revo launcher", config::USAGE, false);
+            return Ok(0);
+        }
+        let settings_only = take_flag(&mut cli, "--settings");
+        let linux = take_flag(&mut cli, "--linux");
+        let no_window = take_flag(&mut cli, "--no-window");
+        let check_only = take_flag(&mut cli, "--check");
+        let setup_only = take_flag(&mut cli, "--setup");
+        if settings_only || (cli.is_empty() && !no_window && !check_only && !setup_only) {
+            if win32::is_wine() {
+                match win32::prefer_gpu_opengl() {
+                    Ok(true) => log_line("Wine settings window: OpenGL through GLX (UseEGL=N)"),
+                    Ok(false) => {}
+                    Err(error) => log_line(&format!("warning: {error}")),
+                }
+            }
+            let text =
+                fs::read_to_string(&settings_path).unwrap_or_else(|_| config::TEMPLATE.into());
+            match ui::show(&settings_path, &text, linux) {
+                Ok(ui::Outcome::Play) => {
+                    if settings_only {
+                        return Ok(0);
+                    }
+                }
+                Ok(ui::Outcome::Closed) => {
+                    return Ok(if settings_only { WINDOW_CLOSED } else { 0 });
+                }
+                Err(error) => {
+                    log_line(&format!("settings window unavailable: {error}"));
+                    if settings_only {
+                        return Ok(WINDOW_UNAVAILABLE);
+                    }
+                }
+            }
+        }
+
+        let existing = fs::read_to_string(&settings_path).ok();
+        let file_text = existing.as_deref().unwrap_or(config::TEMPLATE);
+        let (saved, warnings) = Settings::parse_file(file_text);
+        for warning in warnings {
+            log_line(&format!("warning: {warning}"));
+        }
+        let settings = saved.clone().merged(Settings::parse_args(cli)?);
+        let game = find_game(&settings)?;
+
+        let main_bytes = read_exe(&game, edition::MAIN_EXE);
+        let sse1_bytes = read_exe(&game, edition::SSE1_EXE);
+        let mut editions = edition::GameEditions {
+            main: edition::identify(main_bytes.as_deref().unwrap_or(&[])),
+            sse1: edition::identify(sse1_bytes.as_deref().unwrap_or(&[])),
+        };
+        if !editions.playable() {
+            let unknown = editions
+                .unknown_note()
+                .unwrap_or_else(|| "no known executable".into());
+            return Err(format!(
+                "This launcher supports the Sega Rally Revo PC v4.0.6.0 build \
+                 (the clean SEGA Rally_SSE1.exe or the full-rip NoDVD SEGA Rally.exe).\n\n{unknown}"
+            ));
+        }
+        log_line(&format!(
+            "game: {} ({})",
+            game.display(),
+            [editions.main.ok(), editions.sse1.ok()]
+                .into_iter()
+                .flatten()
+                .map(|edition| edition.name)
+                .collect::<Vec<_>>()
+                .join(" · ")
+        ));
+        if check_only {
+            win32::message(
+                "Sega Rally Revo launcher",
+                &format!(
+                    "Ready to set up.\n\nGame folder: {}\n{}",
+                    game.display(),
+                    [editions.main.ok(), editions.sse1.ok()]
+                        .into_iter()
+                        .flatten()
+                        .map(|edition| edition.name)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ),
+                false,
+            );
+            return Ok(0);
+        }
+
+        let runtime_dir = settings
+            .runtime
+            .clone()
+            .unwrap_or_else(|| home().join("SegaRally"));
+        runtime::check_separate(&game, &runtime_dir)?;
+        let copied = runtime::sync(&game, &runtime_dir)
+            .map_err(|error| format!("cannot prepare {}: {error}", runtime_dir.display()))?;
+        log_line(&format!(
+            "runtime: {} ({copied} files copied)",
+            runtime_dir.display()
+        ));
+
+        let renamed = runtime::disable_bootup_videos(&runtime_dir);
+        if renamed > 0 {
+            log_line(&format!(
+                "disabled {renamed} bootup logo video(s) in the runtime"
+            ));
+        }
+
+        // Stutter fix: apply the pacer patch to the private SSE1 copy.
+        let mut pacer_done = false;
+        let mut stutter_fix = settings.effective_stutter_fix();
+        if stutter_fix && !editions.pacer_available() {
+            log_line(
+                "stutter fix: requested but the clean SEGA Rally_SSE1.exe is not present; \
+                 running unpatched",
+            );
+            stutter_fix = false;
+        }
+        if stutter_fix {
+            let mut bytes = read_exe(&runtime_dir, edition::SSE1_EXE)
+                .ok_or("the private SSE1 copy disappeared")?;
+            match edition::identify(&bytes) {
+                Ok(edition) if std::ptr::eq(edition, &edition::SSE1_PACER) => {
+                    pacer_done = true;
+                    log_line("stutter fix: already applied to the private copy");
+                }
+                Ok(edition) if std::ptr::eq(edition, &edition::SSE1_CLEAN) => {
+                    match patches::pacer(&mut bytes) {
+                        Ok(true) => {
+                            write_exe(&runtime_dir, edition::SSE1_EXE, &bytes)?;
+                            pacer_done = true;
+                            log_line("stutter fix: pacer patch applied to the private copy");
+                        }
+                        Ok(false) => {
+                            pacer_done = true;
+                        }
+                        Err(error) => return Err(format!("stutter fix: {error}")),
+                    }
+                }
+                _ => {
+                    return Err(
+                        "stutter fix: the private SSE1 copy is not the clean build".to_string()
+                    );
+                }
+            }
+        }
+        editions.sse1 = edition::identify(
+            &read_exe(&runtime_dir, edition::SSE1_EXE).ok_or("cannot re-read the SSE1 copy")?,
+        );
+
+        // The exe this run launches: the patched SSE1 build when the fix is
+        // active, otherwise the rip's main NoDVD exe when present.
+        let launch_name = if pacer_done {
+            edition::SSE1_EXE
+        } else if editions.main.is_ok() {
+            edition::MAIN_EXE
+        } else {
+            edition::SSE1_EXE
+        };
+        log_line(&format!("launch executable: {launch_name}"));
+
+        let screen = win32::screen_size();
+        let mut picture = Picture {
+            resolution: settings.resolution,
+            aspect: settings.aspect,
+            quality: settings.effective_quality(),
+            fullscreen: settings.fullscreen.unwrap_or(true),
+            vsync: settings.vsync.unwrap_or(true),
+        }
+        .resolved(screen);
+        let wine = win32::is_wine();
+        let gamescope = std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_some();
+        let (width, height) = picture.resolution.unwrap();
+        let mode_supported = wine || win32::display_mode_supported(width, height);
+        let (fullscreen, fallback) = display::effective_fullscreen(
+            picture.fullscreen,
+            wine,
+            gamescope,
+            screen.is_some_and(|(width, height)| width < height),
+            mode_supported,
+        );
+        picture.fullscreen = fullscreen;
+        if let Some(reason) = fallback {
+            match reason {
+                display::Fallback::VirtualDesktop => log_line(&format!(
+                    "display: using an isolated Wine desktop at {width}x{height}"
+                )),
+                display::Fallback::Portrait => {
+                    log_line("display fallback: the current monitor is portrait; playing windowed")
+                }
+                display::Fallback::UnsupportedMode => {
+                    log_line("display fallback: no such fullscreen mode; playing windowed")
+                }
+            }
+        }
+
+        // Aspect tables: patch every game exe in the runtime so the choice
+        // survives a later switch between the SSE1 and NoDVD builds.
+        let aspect = settings.effective_aspect(screen);
+        if !patches::is_native_aspect(aspect.ratio()) {
+            for name in [edition::MAIN_EXE, edition::SSE1_EXE] {
+                if let Some(mut bytes) = read_exe(&runtime_dir, name) {
+                    let written = patches::aspect(&mut bytes, aspect.ratio())
+                        .map_err(|error| format!("aspect patch: {error}"))?;
+                    if written > 0 {
+                        write_exe(&runtime_dir, name, &bytes)?;
+                        log_line(&format!(
+                            "aspect: {} patched into {written} table(s) of {name}",
+                            aspect.key()
+                        ));
+                    }
+                }
+            }
+        } else if let Some(mut bytes) = read_exe(&runtime_dir, launch_name) {
+            let restored = patches::aspect(&mut bytes, 16.0 / 9.0)
+                .map_err(|error| format!("aspect restore: {error}"))?;
+            if restored > 0 {
+                write_exe(&runtime_dir, launch_name, &bytes)?;
+                log_line(&format!(
+                    "aspect: restored the native 16:9 constant in {restored} table(s)"
+                ));
+            }
+        }
+
+        // The game's own configuration, written the way the original .NET
+        // launcher would have written it.
+        let profile = std::env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+            .ok_or("cannot locate the profile folder")?;
+        let public = std::env::var_os("PUBLIC")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                profile
+                    .parent()
+                    .map(|parent| parent.join("Public"))
+                    .unwrap_or_else(|| profile.clone())
+            });
+        let paths = gamecfg::documents_paths(&profile, &public);
+        for dir in [&paths.saved_games, &paths.rank_table, &paths.ghosts] {
+            fs::create_dir_all(dir)
+                .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+        }
+        let config_path = paths.saved_games.join("config.ini");
+        let config_text = match fs::read_to_string(&config_path) {
+            Ok(existing) => gamecfg::update_config(
+                &existing,
+                picture.resolution.unwrap(),
+                picture.quality,
+                picture.vsync,
+            ),
+            Err(_) => {
+                gamecfg::seed_config(picture.resolution.unwrap(), picture.quality, picture.vsync)
+            }
+        };
+        fs::write(&config_path, config_text)
+            .map_err(|error| format!("cannot write {}: {error}", config_path.display()))?;
+        for file in [
+            (paths.saved_games.join("SEGA Rally.dat"), "save file"),
+            (paths.rank_table.join("SR_RANKTABLES.DAT"), "rank table"),
+        ] {
+            if !file.0.exists() && fs::write(&file.0, b"").is_err() {
+                return Err(format!("cannot seed the {}", file.1));
+            }
+        }
+        log_line(&format!(
+            "configured: {}x{} {}, {}, fullscreen {}, vsync {}",
+            picture.resolution.unwrap().0,
+            picture.resolution.unwrap().1,
+            aspect.key(),
+            picture.quality.key(),
+            picture.fullscreen,
+            picture.vsync,
+        ));
+
+        // Registry values the game reads before it will start.
+        let runtime_windows = runtime_dir.display().to_string();
+        let values = gamecfg::registry_values(&runtime_windows, &settings.effective_language());
+        match win32::seed_game_registry(&values) {
+            Ok(()) => log_line(&format!(
+                "registry: installdir + language {} seeded",
+                settings.effective_language()
+            )),
+            Err(error) => log_line(&format!("warning: {error}")),
+        }
+
+        configure_dxvk(&runtime_dir, linux)?;
+        let dxvk_conf = runtime_dir.join("dxvk.conf");
+        if linux {
+            fs::write(
+                &dxvk_conf,
+                gamecfg::dxvk_conf(settings.effective_frame_limit().fps()),
+            )
+            .map_err(|error| format!("cannot write dxvk.conf: {error}"))?;
+            log_line(&format!(
+                "dxvk: frame limit {}",
+                settings
+                    .effective_frame_limit()
+                    .fps()
+                    .map(|fps| fps.to_string())
+                    .unwrap_or_else(|| "off".into())
+            ));
+        }
+
+        if existing.is_none() || saved.game.as_ref() != Some(&game) {
+            let text = config::set_key(file_text, "game", &game.display().to_string());
+            if let Some(parent) = settings_path.parent() {
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            fs::write(&settings_path, text)
+                .map_err(|error| format!("cannot save {}: {error}", settings_path.display()))?;
+        }
+        if !win32::is_wine() {
+            let runtime_exe = runtime_dir.join(launch_name);
+            match win32::prefer_fast_gpu(&runtime_exe) {
+                Ok(true) => log_line("Windows high-performance GPU preference set"),
+                Ok(false) => {}
+                Err(error) => log_line(&format!("warning: {error}")),
+            }
+        }
+        if setup_only {
+            log_line("setup complete");
+            return Ok(0);
+        }
+
+        let runtime_exe = runtime_dir.join(launch_name);
+        let mut command = if matches!(fallback, Some(display::Fallback::VirtualDesktop)) {
+            let mut command = Command::new("explorer");
+            command
+                .arg(format!("/desktop=SegaRally,{width}x{height}"))
+                .arg(&runtime_exe);
+            command
+        } else {
+            Command::new(&runtime_exe)
+        };
+        let status = command
+            .current_dir(&runtime_dir)
+            .status()
+            .map_err(|error| format!("cannot start {}: {error}", runtime_exe.display()))?;
+        win32::stop_rumble();
+        let code = status.code().unwrap_or(1) as u32;
+        log_line(&format!("game exited with {code}"));
+        Ok(code)
+    }
+}

@@ -1,0 +1,12 @@
+/.work/
+/runtime-data/
+/original-data/
+/assets/
+/target/
+/build/
+/dist/
+__pycache__/
+*.pyc
+.DS_Store
+*.swp
+*~
