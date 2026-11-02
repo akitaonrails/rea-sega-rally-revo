@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use eframe::egui::{self, Align2, Key, Rect, TextureHandle, pos2, vec2};
 use rea_launcher::fsx;
+use rea_launcher_ui::eframe;
+use rea_launcher_ui::egui::{self, Align2, Key, Rect, TextureHandle, pos2, vec2};
 use rea_launcher_ui::pad::{self, Nav, PadNav};
 use rea_launcher_ui::theme::{self, body, decal, semibold};
 use rea_launcher_ui::widgets::{self, Crop, LookCard};
@@ -12,7 +13,7 @@ use srr_launcher::config::{self, FrameLimit, LANGUAGES, Quality};
 use srr_launcher::edition;
 use srr_launcher::form::{self, Form, Look, Picture};
 
-use crate::palette::{BLUE, ERROR, INK, MUTED, ORANGE, PALETTE};
+use crate::palette::{BLUE, ERROR, INK, METRICS, MUTED, ORANGE, PALETTE};
 
 const PHOTO_W: f32 = 300.0;
 
@@ -40,7 +41,7 @@ pub fn show(settings_path: &Path, saved: Option<&str>, linux: bool) -> Result<Ou
         "Sega Rally Revo",
         options,
         Box::new(|cc| {
-            theme::install(&cc.egui_ctx, &PALETTE);
+            theme::install_with(&cc.egui_ctx, &PALETTE, &METRICS);
             cc.egui_ctx.set_zoom_factor(zoom);
             Ok(Box::new(Window::new(
                 &cc.egui_ctx,

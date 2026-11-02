@@ -9,7 +9,7 @@ T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 export HOME=$T SRR_PREFIX=$T/prefix T
 unset SRR_WINETRICKS
-SRR_PLAY_FUNCTIONS_ONLY=1 . "$HERE/../srr-play"
+REA_FUNCTIONS_ONLY=1 REA_PLAY_HERE=$HERE/.. . "$HERE/../srr-play"
 
 # A fake runner: records every command; "Enable SDL" already exists;
 # winetricks is "installed" when $T/has-winetricks exists.

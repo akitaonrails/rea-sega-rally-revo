@@ -7,7 +7,7 @@ T=$(mktemp -d)
 export T HOME=$T SRR_PREFIX=$T/prefix SRR_WINETRICKS=off
 unset SRR_WAIT
 STALE_PID= STALE_START= OTHER_PID= OTHER_START=
-SRR_PLAY_FUNCTIONS_ONLY=1 . "$HERE/../srr-play"
+REA_FUNCTIONS_ONLY=1 REA_PLAY_HERE=$HERE/.. . "$HERE/../srr-play"
 REA_TEST=1
 stop_helper() {
   [ -n "$1" ] || return 0

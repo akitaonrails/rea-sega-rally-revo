@@ -16,9 +16,8 @@ rea-launcher.workspace = true
 [target.'cfg(windows)'.dependencies]
 rea-launcher-win32.workspace = true
 rea-launcher-ui.workspace = true
-eframe = { version = "0.37", default-features = false, features = ["glow"] }
 
-# The palette's contrast test runs on the host too.
+# The palette test and the headless window tests (egui_kittest) run on the
+# host and under sdk/scripts/wine-test.
 [dev-dependencies]
-rea-launcher-ui.workspace = true
-eframe = { version = "0.37", default-features = false, features = ["glow"] }
+rea-launcher-ui = { workspace = true, features = ["testing"] }

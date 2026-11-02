@@ -240,7 +240,7 @@ const FLAG_KEYS: [&str; 9] = [
 /// SRR's own messages for a refused command line (shown in a message box).
 fn arg_message(error: ArgError) -> String {
     match error {
-        ArgError::Help => USAGE.to_string(),
+        ArgError::Help(_) => USAGE.to_string(),
         ArgError::Unknown(flag) => format!("unknown option {flag}\n\n{USAGE}"),
         ArgError::MissingValue(flag) => format!("{flag} needs a value\n\n{USAGE}"),
         ArgError::Bad { flag, value, .. } => match flag.as_str() {
@@ -358,12 +358,10 @@ impl Settings {
     }
 }
 
-/// A screen size as a landscape resolution worth offering. SRR's rule
-/// takes 640x480 itself, unlike the SDK's `display::landscape` (larger
-/// than 640x480), so it stays here.
-pub fn landscape((a, b): (u32, u32)) -> Option<(u32, u32)> {
-    let (width, height) = (a.max(b) & !1, a.min(b) & !1);
-    (width >= 640 && height >= 480 && width <= 7680 && height <= 4320).then_some((width, height))
+/// A screen size as a landscape resolution worth offering: 640x480 and up
+/// (SRR offers 640x480 itself, unlike the SDK's plain `landscape`).
+pub fn landscape(screen: (u32, u32)) -> Option<(u32, u32)> {
+    rea_launcher::display::landscape_from(screen, (640, 480))
 }
 
 #[cfg(test)]

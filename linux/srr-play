@@ -25,17 +25,20 @@
 set -u
 
 # The library: next to this script in a package, else the vendored copy.
+# REA_FUNCTIONS_ONLY / REA_PLAY_HERE: the SDK's test convention
+# (sdk/rea-play.sh, "Tests for a game script").
+_fonly=${REA_FUNCTIONS_ONLY:-}
 _here=$(dirname "$(readlink -f "$0")")
+[ "$_fonly" = 1 ] && [ -n "${REA_PLAY_HERE:-}" ] && _here=$REA_PLAY_HERE
 if [ -f "$_here/rea-play.sh" ]; then
   . "$_here/rea-play.sh"
 elif [ -f "$_here/../sdk/rea-play.sh" ]; then
   . "$_here/../sdk/rea-play.sh"
-elif [ -n "${SRR_PLAY_FUNCTIONS_ONLY:-}" ] && [ -f "$_here/../../sdk/rea-play.sh" ]; then
-  . "$_here/../../sdk/rea-play.sh"   # sourced by linux/tests/*.sh
 else
   echo "rea-play.sh not found next to $0 or in ../sdk (run scripts/sdk-sync)" >&2
   exit 1
 fi
+REA_HERE=$_here REA_NAME=srr-play
 
 REA_APP=srr-launcher
 REA_EXE_NAME=SRRLauncher.exe
@@ -88,5 +91,5 @@ rea_hook_before_start() { bootstrap; }
 
 rea_init || exit 1
 # Tests load the configuration and hooks without running anything.
-[ -n "${SRR_PLAY_FUNCTIONS_ONLY:-}" ] && return 0
+[ "$_fonly" = 1 ] && return 0
 rea_main "$@"

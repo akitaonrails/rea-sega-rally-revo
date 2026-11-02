@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Updated rea-launcher-sdk to v0.2.0.** The settings window's control
+  borders are lighter (`#5475a1` instead of `#1f4a84`) so they reach the
+  3:1 contrast that WCAG asks of controls; text selection in fields keeps
+  the half-strength orange. Windows-target tests also run under Wine in
+  CI. `linux/tests/*.sh` load `srr-play` through the SDK's test
+  convention (`REA_FUNCTIONS_ONLY=1 REA_PLAY_HERE=…`); the old
+  `SRR_PLAY_FUNCTIONS_ONLY` hook is gone.
 - **Built on the shared rea-launcher-sdk v0.1.0.** The launcher's
   generic code (runtime copy, config editing, Win32 helpers, the settings
   window's widgets, the Linux helper's session handling, AppImage

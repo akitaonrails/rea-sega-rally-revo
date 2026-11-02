@@ -6,7 +6,7 @@ HERE=$(dirname "$(readlink -f "$0")")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export HOME=$tmp
-SRR_PLAY_FUNCTIONS_ONLY=1 . "$HERE/../srr-play"
+REA_FUNCTIONS_ONLY=1 REA_PLAY_HERE=$HERE/.. . "$HERE/../srr-play"
 REA_TEST=1
 
 [ "$REA_GAME_PROCS" = 'SEGA Rally.exe|SEGA Rally_SSE1' ] ||

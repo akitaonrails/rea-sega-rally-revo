@@ -6,7 +6,7 @@ HERE=$(dirname "$(readlink -f "$0")")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export HOME=$tmp
-SRR_PLAY_FUNCTIONS_ONLY=1 . "$HERE/../srr-play"
+REA_FUNCTIONS_ONLY=1 REA_PLAY_HERE=$HERE/.. . "$HERE/../srr-play"
 REA_TEST=1
 [ "$REA_GPU_ICD_PIN" = 1 ] || { echo "FAIL: srr-play must pin the Vulkan ICD"; exit 1; }
 # No NVIDIA OpenGL library check is wanted in pin mode; make it fail loudly.
@@ -57,7 +57,7 @@ esac
 # 4. A driver choice the caller made wins, under either variable name.
 for preset in VK_ICD_FILENAMES VK_DRIVER_FILES DRI_PRIME __NV_PRIME_RENDER_OFFLOAD; do
   # $0 is srr-play itself, so it finds the library as when it runs.
-  out=$(env "$preset=already" sh -c 'SRR_PLAY_FUNCTIONS_ONLY=1 . "$0"; REA_TEST=1
+  out=$(env "$preset=already" sh -c 'REA_FUNCTIONS_ONLY=1 . "$0"; REA_TEST=1
     REA_ICD_DIRS=$1 REA_SYSFS=$2 rea_gpu_env' "$HERE/../srr-play" "$tmp/hybrid" "$tmp/nvpci")
   [ -z "$out" ] || { echo "FAIL: preset $preset should win: $out"; exit 1; }
 done
