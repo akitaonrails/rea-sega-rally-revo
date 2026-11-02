@@ -3,6 +3,11 @@
 ## Unreleased
 
 - Updated rea-launcher-sdk to v0.3.2.
+- **Errors reach the player under Wine and Proton.** An error that stops
+  the launcher (wrong game folder, unknown game version, a failed setup)
+  now always shows a message box when you started it, and is printed too,
+  so `srr-play`'s `launcher.log` keeps it. Before, under Wine it only went
+  to the log. `--no-window` runs from a script still get no message box.
 - **One launcher at a time.** Starting the launcher again while its window
   is open brings that window forward. While the game is running from it,
   a second start says so and doesn't start another game (exit code 5).

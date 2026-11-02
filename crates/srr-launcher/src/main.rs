@@ -11,7 +11,7 @@ fn main() {
         Ok(code) => code,
         Err(error) => {
             app::log_line(&format!("error: {error}"));
-            app::report("Sega Rally Revo launcher", &error, true);
+            app::fatal(&error);
             1
         }
     };
@@ -29,15 +29,14 @@ mod app {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use std::sync::OnceLock;
 
     use rea_launcher::identify;
     use rea_launcher::ini::Owned;
     use rea_launcher::log::Log;
     use rea_launcher::{cfg, download, fsx, paths};
-    use rea_launcher_win32::dialog::{self, Icon};
     use rea_launcher_win32::reg::Key;
-    use rea_launcher_win32::{console, disk, display as screen, gpu, http, wine, xinput};
+    use rea_launcher_win32::report::{self, Mode};
+    use rea_launcher_win32::{disk, display as screen, gpu, http, wine, xinput};
     use srr_launcher::config::{self, Settings};
     use srr_launcher::edition::{self, GameEditions};
     use srr_launcher::plan::{self, Env};
@@ -63,29 +62,49 @@ mod app {
         Log::new(home().join("launcher.log")).line(line);
     }
 
-    /// Whether the run has a terminal (attached once, on first use).
-    fn terminal() -> bool {
-        static ATTACHED: OnceLock<bool> = OnceLock::new();
-        *ATTACHED.get_or_init(console::attach_parent)
+    const TITLE: &str = "Sega Rally Revo launcher";
+
+    /// Whether a person may be watching (not `--no-window` from a script).
+    fn interactive() -> bool {
+        !std::env::args().skip(1).any(|arg| arg == "--no-window")
     }
 
-    /// Text for the player: the terminal the launcher was started from, a
-    /// message box when a person started it without one, else only the log.
-    pub fn report(title: &str, text: &str, error: bool) {
-        match console::output(terminal(), console::stdout_usable(), true) {
-            console::Output::Terminal => {
-                if error {
-                    eprintln!("{text}");
-                } else {
-                    println!("{text}");
-                }
-            }
-            console::Output::Dialog => {
-                let icon = if error { Icon::Error } else { Icon::Info };
-                dialog::message(title, text, icon);
-            }
-            console::Output::Nowhere => {}
-        }
+    /// An error the launcher stops on: a dialog when a person may be
+    /// watching, and stdout, which `srr-play` and Proton keep in a log
+    /// (SDK `report`, so it reaches the player under Wine too).
+    pub fn fatal(text: &str) {
+        report::fatal(
+            TITLE,
+            text,
+            Mode::Play {
+                interactive: interactive(),
+            },
+        );
+    }
+
+    /// A message while preparing to play (another launcher is running).
+    fn play_note(text: &str) {
+        report::note(
+            TITLE,
+            text,
+            Mode::Play {
+                interactive: interactive(),
+            },
+            true,
+        );
+    }
+
+    /// Output of a command (`--help`, `--check`, `--download-directx`):
+    /// the terminal, or a dialog when nobody sees it.
+    fn command(text: &str) {
+        report::note(
+            TITLE,
+            text,
+            Mode::Command {
+                interactive: interactive(),
+            },
+            false,
+        );
     }
 
     fn settings_path() -> PathBuf {
@@ -183,7 +202,7 @@ mod app {
         if download::installed(&pin, &root).is_some() {
             let note = "DirectX 9 files: already downloaded";
             log_line(note);
-            report("Sega Rally Revo launcher", note, false);
+            command(note);
             return Ok(0);
         }
         let job = std::sync::Arc::new(download::Job::default());
@@ -212,7 +231,7 @@ mod app {
             dir.display()
         );
         log_line(&note);
-        report("Sega Rally Revo launcher", &note, false);
+        command(&note);
         Ok(0)
     }
 
@@ -227,7 +246,7 @@ mod app {
         let cli = match Settings::parse_args(std::env::args().skip(1)) {
             Ok(cli) => cli,
             Err(message) if message == config::usage() => {
-                report("Sega Rally Revo launcher", &message, false);
+                command(&message);
                 return Ok(0);
             }
             Err(message) => return Err(message),
@@ -245,7 +264,7 @@ mod app {
                     });
                     log_line(&format!("another launcher is running: {second:?}"));
                     if let Some(message) = second.message() {
-                        report("Sega Rally Revo launcher", message, false);
+                        play_note(message);
                     }
                     return Ok(second.exit_code());
                 }
@@ -346,15 +365,11 @@ mod app {
         }
         log_line(&format!("game: {}", game.display()));
         if check_only {
-            report(
-                "Sega Rally Revo launcher",
-                &format!(
-                    "Ready to play.\n\nGame folder: {}\n{}",
-                    game.display(),
-                    editions.names().join("\n")
-                ),
-                false,
-            );
+            command(&format!(
+                "Ready to play.\n\nGame folder: {}\n{}",
+                game.display(),
+                editions.names().join("\n")
+            ));
             return Ok(0);
         }
 
