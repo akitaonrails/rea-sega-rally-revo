@@ -559,9 +559,9 @@ impl Window<'_> {
                     self.form.look == look,
                     title,
                     &note,
-                    look == Look::Modern,
+                    look == form::recommended(self.screen),
                 ) {
-                    self.form.set_look(look, self.screen);
+                    self.form.set_look(look);
                     if look == Look::Custom {
                         self.tab = Tab::Picture;
                     }

@@ -19,6 +19,11 @@
   name with a quote can no longer break or inject into it.
 - The GitHub test-report template was copied from the DiRT launcher; it now
   asks about Sega Rally Revo (`SRRLauncher`, `srr-play`, which executable).
+- Look cards: Custom now stays selected when clicked (it used to jump back
+  to the preset the values matched), and on a Steam Deck the Steam Deck
+  look is recommended, picked on first run and shown as selected (it
+  showed as Modern, whose values are the same at 1280×800). The
+  "Recommended" badge follows the screen instead of always marking Modern.
 
 ## v0.1.1 - 2026-11-02
 

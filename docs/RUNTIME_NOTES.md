@@ -167,3 +167,6 @@ was exercised against the real game yet:
   status` / `srr-play stop` on a real game session, and the AppImage
   (waiting mode) ending cleanly when the game exits or on Ctrl+C. Only
   covered with fake runners and `sleep` (`linux/tests/supervision.sh`).
+- **Look cards on a Steam Deck.** The first-run look and badge on a real
+  Deck (1280×800, Game Mode) are unit-tested only; check that the window
+  shows Steam Deck selected and badged there.

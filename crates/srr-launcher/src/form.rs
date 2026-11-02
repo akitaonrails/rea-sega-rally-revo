@@ -46,6 +46,15 @@ impl Picture {
 
 pub const STEAM_DECK_SCREEN: (u32, u32) = (1280, 800);
 
+/// The look to recommend on a screen: Steam Deck on a Deck, else Modern.
+pub fn recommended(screen: Option<(u32, u32)>) -> Look {
+    if screen.and_then(config::landscape) == Some(STEAM_DECK_SCREEN) {
+        Look::SteamDeck
+    } else {
+        Look::Modern
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Look {
     Modern,
@@ -58,6 +67,9 @@ pub enum Look {
 pub struct Form {
     pub game: String,
     pub picture: Picture,
+    /// Remembered so a look picked by name stays picked even when its
+    /// values match another (Modern on a Deck is the Steam Deck picture),
+    /// and Custom stays selected while the player edits.
     pub look: Look,
     pub frame_limit: FrameLimit,
     pub stutter_fix: bool,
@@ -86,18 +98,23 @@ impl Form {
         }
     }
 
+    /// The form for a first run (no settings file yet): the recommended
+    /// look for this screen.
     pub fn first_run(screen: Option<(u32, u32)>) -> Form {
         let mut form = Form::new(&Settings::default(), screen);
-        form.set_look(Look::Modern, screen);
+        form.set_look(recommended(screen));
         form
     }
 
+    /// The look these picture values make on a screen. The Steam Deck
+    /// preset is checked first: on a 1280×800 screen Modern resolves to the
+    /// same picture, and there the Deck is the one to show.
     pub fn look_of(picture: &Picture, screen: Option<(u32, u32)>) -> Look {
         let picture = picture.resolved(screen);
-        if picture == Picture::MODERN.resolved(screen) {
-            Look::Modern
-        } else if picture == Picture::STEAM_DECK {
+        if picture == Picture::STEAM_DECK {
             Look::SteamDeck
+        } else if picture == Picture::MODERN.resolved(screen) {
+            Look::Modern
         } else if picture == Picture::ORIGINAL {
             Look::Original
         } else {
@@ -105,7 +122,10 @@ impl Form {
         }
     }
 
-    pub fn set_look(&mut self, look: Look, screen: Option<(u32, u32)>) {
+    /// Picks a look; Modern, Steam Deck and Original set the picture,
+    /// Custom keeps the current values to edit. The chosen look is kept as
+    /// is, never worked out again from the values.
+    pub fn set_look(&mut self, look: Look) {
         self.look = look;
         match look {
             Look::Modern => self.picture = Picture::MODERN,
@@ -113,7 +133,6 @@ impl Form {
             Look::Original => self.picture = Picture::ORIGINAL,
             Look::Custom => {}
         }
-        self.look = Form::look_of(&self.picture, screen);
     }
 
     pub fn save(&self, text: &str, screen: Option<(u32, u32)>) -> String {
@@ -253,10 +272,10 @@ mod tests {
     #[test]
     fn original_and_deck_are_distinct() {
         let mut form = Form::first_run(SCREEN);
-        form.set_look(Look::Original, SCREEN);
+        form.set_look(Look::Original);
         assert_eq!(form.picture.quality, Quality::Normal);
         assert_eq!(form.picture.resolution, Some((1280, 720)));
-        form.set_look(Look::SteamDeck, SCREEN);
+        form.set_look(Look::SteamDeck);
         assert_eq!(form.picture.aspect, Some(Aspect::Ratio1610));
         assert_eq!(form.picture.resolution, Some(STEAM_DECK_SCREEN));
     }
@@ -265,7 +284,7 @@ mod tests {
     fn every_field_survives_save_and_load() {
         let mut form = Form::first_run(SCREEN);
         form.game = r"D:\Games\Sega Rally".into();
-        form.set_look(Look::SteamDeck, SCREEN);
+        form.set_look(Look::SteamDeck);
         form.picture.vsync = false;
         form.frame_limit = FrameLimit::Off;
         form.stutter_fix = false;
@@ -280,6 +299,45 @@ mod tests {
         assert_eq!(loaded.language, "Polish");
         // vsync off makes it a custom look, not the Steam Deck preset
         assert_eq!(loaded.look, Look::Custom);
+    }
+
+    const DECK: Option<(u32, u32)> = Some(STEAM_DECK_SCREEN);
+
+    #[test]
+    fn custom_stays_selected_when_picked() {
+        let mut form = Form::first_run(SCREEN);
+        form.set_look(Look::Custom);
+        assert_eq!(form.look, Look::Custom);
+        assert_eq!(form.picture, Form::first_run(SCREEN).picture);
+    }
+
+    #[test]
+    fn a_deck_recommends_and_shows_the_steam_deck_look() {
+        assert_eq!(recommended(DECK), Look::SteamDeck);
+        // Gamescope can report the Deck's panel in portrait.
+        assert_eq!(recommended(Some((800, 1280))), Look::SteamDeck);
+        assert_eq!(recommended(SCREEN), Look::Modern);
+        assert_eq!(recommended(None), Look::Modern);
+
+        let form = Form::first_run(DECK);
+        assert_eq!(form.look, Look::SteamDeck);
+        assert_eq!(form.picture, Picture::STEAM_DECK);
+
+        // Picking Steam Deck on a Deck stays Steam Deck (its values equal
+        // Modern there) and so does reloading what it saved.
+        let mut form = Form::first_run(DECK);
+        form.set_look(Look::Modern);
+        form.set_look(Look::SteamDeck);
+        assert_eq!(form.look, Look::SteamDeck);
+        let (settings, _) = Settings::parse_file(&form.save(config::TEMPLATE, DECK));
+        assert_eq!(Form::new(&settings, DECK).look, Look::SteamDeck);
+    }
+
+    #[test]
+    fn a_picked_look_is_remembered_even_when_values_match_another() {
+        let mut form = Form::first_run(DECK);
+        form.set_look(Look::Modern);
+        assert_eq!(form.look, Look::Modern);
     }
 
     #[test]

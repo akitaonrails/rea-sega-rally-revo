@@ -91,7 +91,7 @@ language (screenshot at the top).
 | Look | Resolution | Aspect | Quality | Vsync |
 | --- | --- | --- | --- | --- |
 | **Modern** (default) | your screen | from the screen | High | on |
-| **Steam Deck** | 1280×800 | 16:10 | High | on |
+| **Steam Deck** (default on a Deck) | 1280×800 | 16:10 | High | on |
 | **Original 2007** | 1280×720 | 16:9 | Normal | on |
 | **Custom** | whatever you set on the Picture tab | | | |
 
