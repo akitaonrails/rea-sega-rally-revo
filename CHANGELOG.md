@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Settings window messages say how to fix the problem: a path that is no
+  folder points at Browse…, a settings file that cannot be saved names
+  it.
 - **`srr-play` no longer runs winetricks.** It used to install `d3dx9`,
   `directplay` and `d3dcompiler_47` into the prefix when winetricks
   happened to be installed (a silent, unrequested download). Wine's own

@@ -85,7 +85,9 @@ pub fn check_game(folder: &str) -> Check {
     }
     let dir = Path::new(folder);
     if !dir.is_dir() {
-        return Check::Problem("No such folder.".into());
+        return Check::Problem(
+            "There is no folder at this path. Check it, or choose the folder with Browse…".into(),
+        );
     }
     let read = |name: &str| std::fs::read(dir.join(name)).ok();
     let (main, sse1) = (read(edition::MAIN_EXE), read(edition::SSE1_EXE));
@@ -168,7 +170,12 @@ impl Window {
                 *self.outcome.lock().unwrap_or_else(|e| e.into_inner()) = Outcome::Play;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
-            Err(error) => self.error = Some(format!("Can't save the settings: {error}")),
+            Err(error) => {
+                self.error = Some(format!(
+                    "Can't save the settings ({error}). Check that {} can be written.",
+                    self.path.display()
+                ))
+            }
         }
     }
 

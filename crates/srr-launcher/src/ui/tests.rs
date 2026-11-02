@@ -278,3 +278,26 @@ fn the_pad_switches_tabs_and_plays() {
     press(&mut ui, rea_launcher::pad::START);
     assert_eq!(*ui.state().outcome.lock().unwrap(), Outcome::Play);
 }
+
+#[test]
+fn a_wrong_folder_says_how_to_fix_it() {
+    let (mut ui, _, dir) = open(None, true, "wrong-folder");
+    ui.state_mut().form.game = dir.join("nowhere").display().to_string();
+    ui.run();
+    ui.run();
+    assert!(
+        ui.query_by_label_contains("choose the folder with Browse")
+            .is_some()
+    );
+    // An empty folder names both executables and where to report.
+    ui.state_mut().form.game = dir.display().to_string();
+    ui.run();
+    ui.run();
+    assert!(
+        ui.query_by_label_contains("Neither SEGA Rally.exe")
+            .is_some()
+    );
+    assert!(testing::disabled(
+        &ui.get_by_role_and_label(Role::Button, "Play")
+    ));
+}
