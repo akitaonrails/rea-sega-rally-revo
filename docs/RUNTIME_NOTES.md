@@ -480,3 +480,71 @@ This settles bug 2 of the verification entry above. The Wine-side
 registry round trip (ours written, the player's value kept, ours taken
 back) is covered by `tests/wine_app_overrides.rs` under
 `sdk/scripts/wine-test`.
+
+## 2026-11-02 — the clean-room stutter fix (integration)
+
+`patches::PACER` is now the clean-room set (`crates/srr-launcher/src/pacer.rs`,
+`pacer/*.asm`; provenance in `docs/PACER-PROVENANCE.md`). On the owner's
+rip (read-only), headless as above:
+
+- `SRR_GAME_DIR=… cargo test real_game -- --ignored` and the env-gated
+  `tests/pacer_real_game.rs`: clean `22655a54…` → **`cb9a5a34…ff65`**,
+  405 bytes changed, all inside the declared sites, PE intact,
+  idempotent, reversible, and combined with sets at the aspect offsets.
+  VERIFIED.
+- Launch with `--stutter-fix on --resolution 1920x1080`: `launcher.log`
+  "SEGA Rally_SSE1.exe: patches pacer (SHA-256 cb9a5a34…ff65)"; the game
+  reached the attract race (Canyon, then the Skoda replay) and ran 60 s
+  until the supervisor's close request (gone in 0.39 s). VERIFIED,
+  `keep/cr-pacer-060.jpg`.
+- With 21:9 (`--resolution 2560x1080`): "patches pacer + aspect 21:9
+  (SHA-256 d3f4a417…d47e)"; the attract race ran 60 s. VERIFIED,
+  `keep/cr-pacer-219-060.jpg`.
+
+Measurements by the clean-room implementer (their harness: the race clock
+`0x9670D8` and the frame timestamp read from `/proc/<pid>/mem` once per
+frame, attract demo race, DXVK in headless gamescope at 60 Hz, GPU
+otherwise idle; an earlier batch on a shared GPU was discarded). Clean
+build vs. clean-room build (`cb9a5a34…`), back to back per mode. Their
+DXVK was 2.7.1 (vsync60 = `presentInterval = 1`; lim60/lim120 =
+`maxFrameRate = 60/120` with vsync off; off = no limit):
+
+| Metric (demo race) | Clean vsync60 | Fixed vsync60 | Clean lim60 | Fixed lim60 | Clean lim120 | Fixed lim120 | Clean off | Fixed off | Target |
+|---|---|---|---|---|---|---|---|---|---|
+| frames scored | 5404 | 5582 | 5631 | 5606 | 11203 | 11406 | 80869 | 102461 | ≥ 3000 |
+| Δrace top values (ms) | 16, 32, 0 | 17, 16, 18 | 16, 32, 0 | 17, 16, 18 | 16, 0 | 8, 9, 7 | 0, 16 | 1, 0, 2 | |
+| Δrace 16–17 ms (60 fps) | 93.2 % | 87.4 % | 93.1 % | 88.6 % | | | | | ≥ 99 % |
+| Δrace 8–9 ms (120 fps) | | | | | 0 % | 84.8 % | | | ≥ 99 % |
+| Δrace = 0 or ≥ 32 ms | 6.8 % | 0 % | 6.9 % | 0 % | 47.9 % | 0 % | (uncapped) | (uncapped) | 0 |
+| \|Δrace − Δpresent\| p99 | 15.3 ms | **0.92 ms** | 16.0 ms | **0.90 ms** | 9.8 ms | **0.88 ms** | 15.2 ms | **0.89 ms** | ≤ 1.5 ms |
+| \|Δrace − Δpresent\| ≤ 1 ms | 54.6 % | 99.87 % | 78.7 % | 99.98 % | 0.03 % | 99.96 % | 40.6 % | 99.94 % | |
+| race clock backwards | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| snaps (>64 ms, no gap) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Δpresent p50 (ms) | 16.94 | 16.95 | 16.66 | 16.66 | 8.32 | 8.33 | 1.06 | 0.82 | |
+| Δpresent p99 − p50 (ms) | 1.12 | 1.55 | 1.36 | 2.15 | 2.82 | 2.83 | 1.66 | 1.51 | ≤ clean + 0.5 |
+| presents 16–18 ms apart | 97.5 % | 95.8 % | 95.0 % | 88.6 % | | | | | |
+| presents 8–10 ms apart | | | | | 71.6 % | 76.6 % | | | |
+| handle replaced while live | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+Reading (theirs, condensed): the clean build moves the race clock only in
+16-ms steps (0/16/32 ms at 60 fps). The fixed build follows each
+presented frame's real time: p99 error 0.88–0.92 ms, within 1 ms on
+99.87–99.98 % of frames, never backwards, no snaps. The "16–17 ms on
+≥ 99 %" target was not met headless because the present cadence itself
+varies there (88.6 % of presents 16–18 ms apart); it needs a real 60-Hz
+display. The lim60 present-cadence spread (+0.79 ms) is one run each and
+more likely DXVK limiter jitter; repeat runs are needed. One pacer (R1)
+was not exercised: the attract loop never starts a second pacer.
+
+Still for a person (not automatable headless):
+
+1. Championship, stages 1 → 2 → 3 (frame limit 60): no stutter or time
+   jump in the stage-2+ countdowns (the old judder); at most one pacer
+   thread.
+2. Pause mid-race for 10 s: the lap timer behaves as in the clean build.
+3. Alt-tab (device lost) and a loading screen: no crash; the race clock
+   jumps forward once, never backwards.
+4. A full race with the same inputs against the community-fixed build:
+   lap times within ±1 frame.
+5. A real 60-Hz display with vsync: the 16–17 ms ≥ 99 % row.
+6. Quit to the menu, a new Quick Race, quit the game: clean exit, no hang.

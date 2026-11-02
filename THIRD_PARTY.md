@@ -52,15 +52,16 @@ Add a row before bundling anything new.
 
 ## Not bundled, but wired
 
-- The community stutter fix (stuken/SegaRallyRevoStutterFix) is
-  reimplemented as the `patches::PACER` table. Its three code caves are the
-  same machine code the fix's `patch.py` writes (about 130 bytes, pinned as
-  golden bytes); the fix's repository has **no licence file**, so those
-  bytes have no grant to be republished. **Owner decision 2026-11-02:**
-  they are being replaced by a clean-room implementation (a written spec,
-  then an independent implementation); until then the table is unchanged.
-  A licence request to the author is drafted in `docs/CONTRIBUTIONS.md`
-  (U1). The game executables it patches belong to the player's own copy.
+- The stutter fix (`patches::PACER`, `crates/srr-launcher/src/pacer.rs`
+  and `pacer/*.asm`) is **this project's own clean-room implementation**
+  (MIT OR Apache-2.0, like the code), written from a specification of the
+  required behaviour and the game's own code; provenance in
+  `docs/PACER-PROVENANCE.md`. stuken/SegaRallyRevoStutterFix is credited
+  for the idea and the problem analysis only; no code or bytes from its
+  `patch.py` (which has no licence) are in this repository since
+  2026-11-02. A player's exe already patched with stuken's fix
+  (SHA-256 `4c08c1de…`) is recognised by hash and run as it is. The game
+  executables it patches belong to the player's own copy.
 
 The launcher never bundles official game patches, cracks, or registry
 files from the rip; the registry values it writes are its own

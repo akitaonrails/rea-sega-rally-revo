@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The stutter fix is now our own clean-room implementation.** It was
+  written from a specification of what the fix must do and the game's own
+  code, without stuken's `patch.py` (which has no licence); stuken is
+  credited for finding the bugs and showing the way. Besides the single
+  pacer thread, the race clock now follows the real time of every frame
+  at any frame limit (measured: within 1 ms on 99.9 % of frames at 60,
+  120 fps and uncapped, never backwards). A `SEGA Rally_SSE1.exe` you
+  patched yourself with stuken's fix is still recognised and run as it
+  is. See `docs/PACER-PROVENANCE.md`.
 - **No more "Player Progress Data Corrupt" / "Local Leaderboard Corrupt"
   on a first start.** The launcher created empty save and leaderboard
   files, which the game reported as corrupt; it now lets the game make

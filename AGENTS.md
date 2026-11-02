@@ -55,12 +55,15 @@ as `distrobox enter gaming -- sh -c 'cd /absolute/path && …'`.
   16:9/16:10 chips did nothing); ultra-wide sizes get the aspect fix.
 - **2026-11-02 — `launcher.cfg` keys use underscores**; the hyphenated
   `frame-limit`/`stutter-fix` stay readable as aliases.
-- **2026-11-02 — the stutter fix gets a clean-room rewrite.** The current
-  `patches::PACER` caves derive from stuken's unlicensed `patch.py`. They
-  are being replaced by a clean-room implementation (a written spec, then
-  an independent implementation, done separately). Until then: don't
-  change the pacer patch code or its tests, and don't copy or quote its
-  cave bytes into docs, issues or other code.
+- **2026-11-02 — the stutter fix is our clean-room implementation.** The
+  old `patches::PACER` caves (derived from stuken's unlicensed `patch.py`)
+  are gone; `patches::PACER` is now `crate::pacer::PACER`, written from a
+  specification and the game's own code (`docs/PACER-PROVENANCE.md`;
+  clean `22655a54…` → `cb9a5a34…ff65`). stuken is credited for the idea
+  and the analysis only. Never bring `patch.py` code or bytes (or those of
+  the community-fixed exe `4c08c1de…`) into this repository; that exe is
+  only recognised by hash as already fixed. Change the pacer through
+  `pacer/*.asm` and keep `tests/pacer_*.rs` green.
 
 - **2026-11-02 — the game makes its own save files.** The launcher no
   longer seeds empty `SEGA Rally.dat` / `SR_RANKTABLES.DAT` (the game
@@ -77,8 +80,8 @@ as `distrobox enter gaming -- sh -c 'cd /absolute/path && …'`.
   `SEGA Rally.exe`). Refuse unknown executables with their SHA-256 and the
   issue link; never patch them.
 - Only the private runtime copies are patched, always from the game
-  folder's untouched executable: the stutter fix (`patches::PACER`, clean
-  SSE1 only, result hash verified) and the ultra-wide aspect sets.
+  folder's untouched executable: the stutter fix (`patches::PACER`, the
+  clean-room set, clean SSE1 only, result hash verified) and the ultra-wide aspect sets.
   Everything else is configuration the game reads.
 - `config.ini` is seeded complete only when missing; afterwards only the
   keys of options set in `launcher.cfg` are written (`ini::Owned`). Never

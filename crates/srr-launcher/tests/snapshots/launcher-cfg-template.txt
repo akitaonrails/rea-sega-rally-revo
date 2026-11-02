@@ -39,8 +39,8 @@
 # Values: 60, 120 or off.
 #frame_limit =
 
-# The community fix for the microstutter in every race and the judder from
-# Championship stage 2. Needs the clean SEGA Rally_SSE1.exe.
+# Fixes the microstutter in every race and the judder from Championship
+# stage 2. Needs the clean SEGA Rally_SSE1.exe.
 # Values: on or off.
 #stutter_fix =
 

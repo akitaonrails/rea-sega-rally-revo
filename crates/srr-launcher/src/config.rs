@@ -253,7 +253,7 @@ pub const OPTIONS: &[OptionSpec] = &[
         "stutter_fix",
         Kind::Toggle,
         "Stutter fix",
-        "The community fix for the microstutter in every race and the judder from Championship stage 2. Needs the clean SEGA Rally_SSE1.exe.",
+        "Fixes the microstutter in every race and the judder from Championship stage 2. Needs the clean SEGA Rally_SSE1.exe.",
     )
     .with_aliases(&["stutter-fix"]),
     OptionSpec::new(

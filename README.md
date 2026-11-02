@@ -29,7 +29,7 @@ loading wait is cut out).*
 | Exclusive fullscreen crashes on multi-monitor and high-refresh Linux desktops | Runs the game inside its own Wine desktop at the resolution you chose |
 | On hybrid-GPU laptops and desktops the game renders on the integrated GPU and shows a black screen | Makes the game use the discrete GPU |
 | Startup stalls on the logo videos under Wine | Turns the two logo videos off in the private copy |
-| Every race microstutters, and Championship stages after the first judder | Applies stuken's community stutter fix to the private copy |
+| Every race microstutters, and Championship stages after the first judder | Applies the launcher's stutter fix (a clean-room rewrite after stuken's analysis) to the private copy |
 | Frame pacing is uneven | Caps the frame rate at 60 fps, or 120 or off for high-refresh screens (Linux, Wine and Proton) |
 | Community fixes overwrite your install | Everything happens in a private copy; your game folder is only read |
 
@@ -178,7 +178,7 @@ commented `launcher.cfg` listing every option.
 | `game` / `--game` | Play: Game folder | a folder | asked on the first run | The folder with `SEGA Rally.exe` or `SEGA Rally_SSE1.exe`. It is only read, never changed. |
 | `runtime` / `--runtime` | — (file and flag only) | a folder outside the game folder | `%LOCALAPPDATA%\SRRLauncher\SegaRally` | Where the launcher keeps its private copy of the game. |
 | `look` / `--look` | Play: Look | `modern`, `steam-deck`, `original`, `custom` | the recommended look | A ready-made picture. On the command line it sets that look's resolution, quality and vsync for one run; other options still win. |
-| `stutter_fix` / `--stutter-fix` | Play: Stutter fix | `on`, `off` | on | The community fix for the microstutter in every race and the judder from Championship stage 2. Needs the clean `SEGA Rally_SSE1.exe`; without it the game runs from `SEGA Rally.exe` and your choice is kept for later. |
+| `stutter_fix` / `--stutter-fix` | Play: Stutter fix | `on`, `off` | on | Fixes the microstutter in every race and the judder from Championship stage 2. Needs the clean `SEGA Rally_SSE1.exe`; without it the game runs from `SEGA Rally.exe` and your choice is kept for later. |
 | `frame_limit` / `--frame-limit` | Play: Frame limit | `60`, `120`, `off` | 60 | The highest frame rate under Linux, Wine or Proton (through DXVK). On native Windows the game follows vsync and the control is greyed out. |
 | `language` / `--language` | Play: Language | `English`, `French`, `German`, `Spanish`, `Italian`, `Polish` | the game's (English when it has none) | The language of the game's menus. |
 | `resolution` / `--resolution` | Picture: Resolution | `auto` or `WIDTHxHEIGHT` | the game's (your screen on a first run) | The game's screen size; `auto` uses your screen. Ultra-wide sizes (21:9 such as 3440×1440, 32:9 such as 5120×1440) get the aspect fix so the picture isn't stretched. |
@@ -382,7 +382,9 @@ and `srr-play`'s settings.
 ## Credits
 
 - **stuken**: [SegaRallyRevoStutterFix](https://github.com/stuken/SegaRallyRevoStutterFix),
-  the stutter fix this launcher applies (reimplemented in Rust).
+  for finding the two stutter bugs and showing they can be fixed. The
+  launcher's fix is our own clean-room implementation; no code from
+  `patch.py` is used (`docs/PACER-PROVENANCE.md`).
 - **DXVK** (Philip Rebohle and contributors): Direct3D 9 on Vulkan for
   Linux.
 - **Wine** and **Kron4ek's** Wine builds: the AppImage's Wine.

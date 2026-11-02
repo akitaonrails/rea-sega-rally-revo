@@ -113,30 +113,34 @@ From the `distrobox-gaming` install history (2026-05-01 through 2026-08-21):
   standard); "enable high frame rate" (PCGamingWiki: also fixes the odd
   frame pacing at 60 Hz; Championship always caps at 62.5 fps).
 
-**The proper fix** is [stuken/SegaRallyRevoStutterFix](https://github.com/stuken/SegaRallyRevoStutterFix):
-three code caves in the clean `SEGA Rally_SSE1.exe` (whose reference MD5
-matches our rip's file byte-for-byte):
+**The community fix** is [stuken/SegaRallyRevoStutterFix](https://github.com/stuken/SegaRallyRevoStutterFix)
+(`patch.py`, no licence): it showed that both bugs can be fixed in the
+clean `SEGA Rally_SSE1.exe` (whose reference MD5 matches our rip's file
+byte-for-byte) with a pacer spawn guard (B) and a race clock taken from
+the master clock (A).
 
-1. *Pacer spawn guard* — at most one pacer thread (fixes B).
-2. *Race-clock tick samples the master clock* instead of `+16 ms` (fixes A
-   at the source).
-3. *Main loop refreshes the race clock every frame* (makes A impossible
-   even if a pacer stalls).
+**The shipped fix is our clean-room implementation** (owner decision,
+2026-11-02): a specification of the required behaviour (invariants R1–R6),
+then an independent implementation from that specification and the game's
+own code read with REA, with no access to `patch.py`, its output or the
+old table (`docs/PACER-PROVENANCE.md`). stuken is credited for the idea
+and the problem analysis only. What it does (`crates/srr-launcher/src/pacer.rs`,
+`pacer/*.asm`):
 
-**Clean-room rewrite (owner decision, 2026-11-02).** The current caves
-derive from stuken's unlicensed `patch.py` (the repository has no licence),
-so they are being replaced by a clean-room implementation: a spec of what
-the three changes must do, written from the behaviour above, then an
-independent implementation from that spec alone. Until it lands the
-current table stays as it is. Docs and issues describe the fix by
-behaviour, never by its cave bytes.
+- R1: the pacer spawn routine returns early while a pacer is alive (one
+  pacer thread: fixes B).
+- R2/R4: all five writers of the race clock store `master_µs / 1000`
+  through one routine, under the master clock's own lock, never backwards;
+  the `+16 ms` tick is gone (fixes A).
+- R3: the race clock is refreshed from the frame timestamp at every
+  present and on entry to the in-race keyframe update; the pacer stands
+  aside while that happens.
 
-This launcher reimplements that patch in Rust (`patches::pacer`), with the
-same self-checks (clean hook-site bytes, zero-filled caves, size guard,
-overlap guard) and the same normalisation sites. Golden bytes from the
-reference assembly are pinned in the unit tests; applying the patch to the
-real game file reproduces the reference SHA-256
-`4c08c1de…f1ad08f2520` (verified on this machine).
+Eight code sites, one 224-byte cave in `.text` slack, `.text` and `.data`
+VirtualSize raised; clean `22655a54…` → `cb9a5a34…ff65` (verified by the
+SDK on every launch). Headless measurements (race clock vs. present
+interval) are in `docs/RUNTIME_NOTES.md`. A player's exe patched with
+stuken's fix (`4c08c1de…`) is recognised and run as it is.
 
 A second patch, [Martijnsx/Sega-Rally-Revo-Frame-Pacing-Fix](https://github.com/Martijnsx/Sega-Rally-Revo-Frame-Pacing-Fix)
 (P1: two timer initializers 15,999 µs → 0, four bytes), targets a
@@ -189,7 +193,7 @@ configuration; multisample stability under DXVK is untested.
 
 | Project | What it fixes | Licence | Maintained | Decision |
 | --- | --- | --- | --- | --- |
-| [stuken/SegaRallyRevoStutterFix](https://github.com/stuken/SegaRallyRevoStutterFix) | both stutter bugs, clean SSE1 v4.0.6.0 only (`patch.py`) | **none** (no licence file; README and `patch.py` state no terms; checked 2026-11-02) | yes (last push 2026-09-12) | reimplemented as `patches::PACER`; its cave machine code equals the fix's output. **Owner decision 2026-11-02:** the current caves derive from stuken's unlicensed `patch.py`; they are being replaced by a clean-room implementation (a written spec of the behaviour, then an independent implementation, done separately). The U1 licence request (`docs/CONTRIBUTIONS.md`) stays a draft. |
+| [stuken/SegaRallyRevoStutterFix](https://github.com/stuken/SegaRallyRevoStutterFix) | both stutter bugs, clean SSE1 v4.0.6.0 only (`patch.py`) | **none** (no licence file; README and `patch.py` state no terms; checked 2026-11-02) | yes (last push 2026-09-12) | not used as code: credited for the idea and the analysis; the shipped fix is our clean-room implementation (2026-11-02, `docs/PACER-PROVENANCE.md`); a player's exe patched with it is recognised by hash. The U1 licence request (`docs/CONTRIBUTIONS.md`) is no longer needed for the launcher. |
 | [Martijnsx/Sega-Rally-Revo-Frame-Pacing-Fix](https://github.com/Martijnsx/Sega-Rally-Revo-Frame-Pacing-Fix) | timer initialisers 15,999 µs → 0 (P1), HTML/Python patcher | **none** (no licence file, checked 2026-11-02) | yes (last push 2026-10-21) | not used: another build (3,700,786 bytes). Nothing taken from it. |
 | DXVK (`d3d9.maxFrameRate`) | Linux/Wine renderer, frame limiter | Zlib | yes | bundled (pinned, mirrored) |
 | Widescreen Fixer / WSGF hex edit | ultra-wide aspect | WSGF technique (no code) | — | technique reused at our builds' offsets |
