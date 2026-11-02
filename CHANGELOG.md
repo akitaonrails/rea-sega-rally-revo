@@ -34,6 +34,7 @@ Fixed before release, found by the first real runs (see
 - The stutter fix recognizes the clean SSE1 copy (it refused every launch).
 - Bootup logo videos stay disabled after the first launch.
 - The settings tabs scroll instead of running into the footer.
-- `srr-play` ignores zombie game processes.
+- `srr-play` ignores zombie game processes, and says why when the settings
+  window closes without starting the game.
 - The AppImage runtime is pinned to type2-runtime 20251108 instead of the
   rolling `continuous` build.

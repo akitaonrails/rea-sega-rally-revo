@@ -40,7 +40,7 @@ Exit codes of the settings run: 0 play, 3 window closed, 4 no window.
 | `SRR_SYSFS` | `/sys` | sysfs root (tests) |
 
 State lives in `~/.config/srr-launcher` (`running.pid`, `play.log`,
-`inner.sh`). Run `sh linux/tests/gpu-env.sh` and
+`settings.log`, `inner.sh`). Run `sh linux/tests/gpu-env.sh`,
 `sh linux/tests/config-keys.sh`, and `sh linux/tests/game-alive.sh` to
 exercise the host-side helpers.
 

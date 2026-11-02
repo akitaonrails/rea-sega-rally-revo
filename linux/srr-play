@@ -168,13 +168,15 @@ launch() {
 
 settings() {
   bootstrap
-  $RUN env WINEPREFIX="$PREFIX" $GPU wine "$LAUNCHER" --settings --linux 2>/dev/null
+  $RUN env WINEPREFIX="$PREFIX" $GPU wine "$LAUNCHER" --settings --linux 2>"$STATE/settings.log"
   rc=$?
   $RUN env WINEPREFIX="$PREFIX" wineserver -w 2>/dev/null
   case $rc in
     0|4) return 0 ;;
-    *) return 1 ;;
+    3) echo "settings window closed without Play; nothing started" ;;
+    *) echo "settings window failed (exit $rc); see $STATE/settings.log" ;;
   esac
+  return 1
 }
 
 [ -n "${SRR_PLAY_FUNCTIONS_ONLY:-}" ] && return 0

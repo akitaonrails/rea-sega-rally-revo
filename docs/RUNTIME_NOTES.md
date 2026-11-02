@@ -89,11 +89,8 @@ Verified:
 
 Not verified:
 
-- **AppImage frames.** In headless gamescope the AppImage run stayed black
-  for 130 s (the same game reached its title at ~60 s with the box's Wine
-  11.21). Whether this is the bundled Wine 11.20, the `srr-play` wrapper,
-  or the headless capture is not known yet; watch the first AppImage run
-  on a real desktop.
+- Driving through a full stage with the pad was not recorded in detail
+  (see the next entry for what the user confirmed).
 
 - Driving with a pad, rumble, audio output, in-race frame pacing.
 - The isolated Wine desktop path (`srr-play` on a real desktop, outside
@@ -104,3 +101,17 @@ Not verified:
 Harness gotcha: run any `wine` command before starting gamescope only if
 `wineserver -w` follows; otherwise the display-less wineserver it starts
 is reused inside gamescope and every window falls back to the null driver.
+
+## 2026-11-01 — the user's first AppImage run on the real desktop
+
+The user ran the locally built `SRRLauncher-x86_64.AppImage` on the host
+(Hyprland, 4K Odyssey G8, RTX 5090), with no winetricks installed: the
+settings window appeared, the game folder was chosen with Browse, Play
+copied the game into a fresh prefix, and the game worked ("game is working
+fine now"). This settles the black frames seen only in headless gamescope
+with the AppImage: the real-desktop path (isolated Wine desktop) renders.
+
+Found along the way: closing the settings window without Play ended
+`srr-play` silently, and the settings step's stderr went to `/dev/null`.
+It now says why it stopped and keeps that output in
+`~/.config/srr-launcher/settings.log`.
