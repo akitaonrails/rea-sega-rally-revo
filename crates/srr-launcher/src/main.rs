@@ -257,14 +257,19 @@ mod app {
             match rea_launcher_win32::instance::single(instance::NAME) {
                 Ok(guard) => Some(guard),
                 Err(running) => {
-                    let second = instance::Second::of(|| {
-                        running.bring_to_front(rea_launcher_win32::instance::Window::Title(
-                            instance::WINDOW_TITLE,
-                        ))
-                    });
+                    let window =
+                        rea_launcher_win32::instance::Window::Title(instance::WINDOW_TITLE);
+                    let second = instance::Second::of(
+                        instance::is_action(&cli.switches),
+                        || running.is_window_found(window),
+                        || running.bring_to_front(window),
+                    );
                     log_line(&format!("another launcher is running: {second:?}"));
-                    if let Some(message) = second.message() {
-                        play_note(message);
+                    match second.message() {
+                        // An action's outcome goes where its output goes.
+                        Some(message) if instance::is_action(&cli.switches) => command(message),
+                        Some(message) => play_note(message),
+                        None => {}
                     }
                     return Ok(second.exit_code());
                 }

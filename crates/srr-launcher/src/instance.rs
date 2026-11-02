@@ -19,6 +19,18 @@ pub const ALREADY_RUNNING: u32 = 5;
 pub const BUSY: &str = "Sega Rally Revo is already running from this launcher. \
      Quit the game first, then start the launcher again.";
 
+/// What a second `--download-directx` says when the settings window is
+/// open: that window may be downloading the same files right now.
+pub const WINDOW_OPEN: &str = "The launcher window is open; use its Download button. \
+     (--download-directx works when the window is closed.)";
+
+/// Whether a run with these switches is an action that does its work
+/// without the window (SDK v0.3.2 "action flags"): a second start must
+/// not bring the window forward and exit 0 as if the work were done.
+pub fn is_action(switches: &[String]) -> bool {
+    switches.iter().any(|switch| switch == "--download-directx")
+}
+
 /// Whether a run with these switches takes the instance. `--check` only
 /// reads the game folder, so it may run next to a game; every other run
 /// (window, play, `--setup`, `--download-directx`) writes the private
@@ -35,13 +47,29 @@ pub enum Second {
     /// No window (the game is running): say so and exit with
     /// [`ALREADY_RUNNING`].
     Busy,
+    /// An action flag found the settings window open: say to use the
+    /// window, leave it where it is, exit with [`ALREADY_RUNNING`].
+    WindowOpen,
 }
 
 impl Second {
     /// `bring_to_front` is the SDK's `AlreadyRunning::bring_to_front` for
     /// [`WINDOW_TITLE`] (a fake in tests).
-    pub fn of(bring_to_front: impl FnOnce() -> bool) -> Second {
-        if bring_to_front() {
+    /// For an action flag (`action`), `window_found` is the SDK's
+    /// `AlreadyRunning::is_window_found` (a fake in tests): the window is
+    /// never brought forward and the run always fails.
+    pub fn of(
+        action: bool,
+        window_found: impl FnOnce() -> bool,
+        bring_to_front: impl FnOnce() -> bool,
+    ) -> Second {
+        if action {
+            if window_found() {
+                Second::WindowOpen
+            } else {
+                Second::Busy
+            }
+        } else if bring_to_front() {
             Second::Focused
         } else {
             Second::Busy
@@ -51,7 +79,7 @@ impl Second {
     pub fn exit_code(self) -> u32 {
         match self {
             Second::Focused => 0,
-            Second::Busy => ALREADY_RUNNING,
+            Second::Busy | Second::WindowOpen => ALREADY_RUNNING,
         }
     }
 
@@ -60,6 +88,7 @@ impl Second {
         match self {
             Second::Focused => None,
             Second::Busy => Some(BUSY),
+            Second::WindowOpen => Some(WINDOW_OPEN),
         }
     }
 }
@@ -88,18 +117,44 @@ mod tests {
     fn a_second_start_brings_the_window_forward_or_refuses_to_play() {
         // The first launcher shows its window: it comes forward, no message.
         let asked = Cell::new(0);
-        let second = Second::of(|| {
-            asked.set(asked.get() + 1);
-            true
-        });
+        let second = Second::of(
+            false,
+            || unreachable!(),
+            || {
+                asked.set(asked.get() + 1);
+                true
+            },
+        );
         assert_eq!(asked.get(), 1);
         assert_eq!(second, Second::Focused);
         assert_eq!((second.exit_code(), second.message()), (0, None));
         // The first launcher is waiting for the game: Play is refused.
-        let second = Second::of(|| false);
+        let second = Second::of(false, || unreachable!(), || false);
         assert_eq!(second, Second::Busy);
         assert_eq!(second.exit_code(), ALREADY_RUNNING);
         assert!(second.message().unwrap().contains("Quit the game first"));
+    }
+
+    #[test]
+    fn download_directx_with_the_window_open_says_to_use_it_and_fails() {
+        let action = switches(&["--download-directx"]);
+        assert!(is_action(&action));
+        assert!(!is_action(&switches(&["--no-window"])));
+        assert!(!is_action(&[]));
+        // The window is open: it is not brought forward, the run fails.
+        let second = Second::of(is_action(&action), || true, || unreachable!());
+        assert_eq!(second, Second::WindowOpen);
+        assert_eq!(second.exit_code(), ALREADY_RUNNING);
+        assert!(
+            second
+                .message()
+                .unwrap()
+                .contains("use its Download button")
+        );
+        // The game (or another action) holds the instance: busy, failed.
+        let second = Second::of(true, || false, || unreachable!());
+        assert_eq!(second, Second::Busy);
+        assert_ne!(second.exit_code(), 0);
     }
 
     #[test]

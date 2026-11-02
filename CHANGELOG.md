@@ -8,6 +8,10 @@
   now always shows a message box when you started it, and is printed too,
   so `srr-play`'s `launcher.log` keeps it. Before, under Wine it only went
   to the log. `--no-window` runs from a script still get no message box.
+- `--download-directx` while the settings window is open says "The
+  launcher window is open; use its Download button" and exits with code 5.
+  It used to bring the window forward and exit 0, which a script read as
+  a finished download.
 - **One launcher at a time.** Starting the launcher again while its window
   is open brings that window forward. While the game is running from it,
   a second start says so and doesn't start another game (exit code 5).
