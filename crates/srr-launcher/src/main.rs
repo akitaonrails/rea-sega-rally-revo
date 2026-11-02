@@ -39,7 +39,7 @@ mod app {
 
     use crate::{ui, win32};
 
-    const DXVK_MARKER: &str = ".srr-dxvk";
+    use runtime::DXVK_MARKER;
 
     fn home() -> PathBuf {
         std::env::var_os("LOCALAPPDATA")
@@ -262,7 +262,12 @@ mod app {
             .clone()
             .unwrap_or_else(|| home().join("SegaRally"));
         runtime::check_separate(&game, &runtime_dir)?;
-        let copied = runtime::sync(&game, &runtime_dir)
+        if !linux {
+            // Back on native Windows after a Linux run: drop our DXVK first,
+            // so the sync brings the player's own d3d9.dll (if any) back.
+            configure_dxvk(&runtime_dir, false)?;
+        }
+        let copied = runtime::sync(&game, &runtime_dir, linux)
             .map_err(|error| format!("cannot prepare {}: {error}", runtime_dir.display()))?;
         log_line(&format!(
             "runtime: {} ({copied} files copied)",
@@ -452,7 +457,9 @@ mod app {
             Err(error) => log_line(&format!("warning: {error}")),
         }
 
-        configure_dxvk(&runtime_dir, linux)?;
+        if linux {
+            configure_dxvk(&runtime_dir, true)?;
+        }
         let dxvk_conf = runtime_dir.join("dxvk.conf");
         // Any DXVK reads dxvk.conf from the game folder: ours (srr-play,
         // AppImage) or Proton's own when Steam starts the launcher directly.

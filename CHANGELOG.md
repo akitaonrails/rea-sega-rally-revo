@@ -37,8 +37,11 @@
   exists or when reached through `..` or a symlink (the nearest existing
   parent is resolved).
 - Syncing the game folder never overwrites the launcher's own runtime
-  files: a `d3d9.dll` or `dxvk.conf` in the game folder (not part of the
-  v4.0.6.0 game) is no longer copied over the installed DXVK.
+  files: `dxvk.conf` and the launcher's bookkeeping always, and `d3d9.dll`
+  while the launcher manages DXVK (Linux, or its marker is present). On
+  native Windows a `d3d9.dll` of your own (ReShade, dgVoodoo, DXVK for
+  Windows) is still copied and kept up to date, and is restored when you
+  come back to Windows after a Linux run.
 - With the bundled DXVK (srr-play, AppImage) the game starts with
   `WINEDLLOVERRIDES` carrying `d3d9=n,b` first, so a `d3d9=b` elsewhere in
   the environment cannot swap DXVK for Wine's own d3d9; every other rule

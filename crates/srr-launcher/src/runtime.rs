@@ -20,24 +20,34 @@ pub struct Plan {
     pub manifest: Listing,
 }
 
+/// The marker `SRRLauncher` leaves next to the DXVK `d3d9.dll` it installs.
+pub const DXVK_MARKER: &str = ".srr-dxvk";
+
 /// Files the launcher owns in the runtime copy and a sync must never
-/// overwrite: the DXVK `d3d9.dll` it installs for Linux (removed again on
-/// Windows), the `dxvk.conf` it writes, and its own bookkeeping. A
-/// `d3d9.dll` or `dxvk.conf` in the player's game folder (a stray wrapper or
-/// an old DXVK install) is not part of the v4.0.6.0 game and is not copied.
-pub fn is_owned(rel: &str) -> bool {
-    const OWNED: [&str; 4] = ["d3d9.dll", "dxvk.conf", MANIFEST, ".srr-dxvk"];
+/// overwrite: the `dxvk.conf` it writes and its own bookkeeping, always;
+/// `d3d9.dll` only while the launcher manages DXVK there (`dxvk_managed`:
+/// `--linux`, or its marker is present). On native Windows a player's own
+/// `d3d9.dll` (ReShade, dgVoodoo, DXVK for Windows) is copied like any
+/// other game file.
+pub fn is_owned(rel: &str, dxvk_managed: bool) -> bool {
+    const OWNED: [&str; 3] = ["dxvk.conf", MANIFEST, DXVK_MARKER];
     OWNED.iter().any(|name| rel.eq_ignore_ascii_case(name))
+        || (dxvk_managed && rel.eq_ignore_ascii_case("d3d9.dll"))
 }
 
 /// Decides which files to copy: a file missing from the runtime or changed
 /// in the source since the last copy (per the manifest), never one the
 /// launcher owns.
-pub fn plan(source: &Listing, runtime_has: &dyn Fn(&str) -> bool, manifest: &Listing) -> Plan {
+pub fn plan(
+    source: &Listing,
+    runtime_has: &dyn Fn(&str) -> bool,
+    manifest: &Listing,
+    dxvk_managed: bool,
+) -> Plan {
     let mut copy = Vec::new();
     let mut next = Listing::new();
     for (rel, stamp) in source {
-        if is_owned(rel) {
+        if is_owned(rel, dxvk_managed) {
             continue;
         }
         let present = runtime_has(rel);
@@ -198,9 +208,12 @@ fn make_writable(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, permissions)
 }
 
-pub fn sync(game: &Path, runtime: &Path) -> io::Result<usize> {
+/// Brings the runtime copy up to date with the game folder. `linux` means
+/// the launcher installs its DXVK `d3d9.dll` in this run.
+pub fn sync(game: &Path, runtime: &Path, linux: bool) -> io::Result<usize> {
     let source = list(game)?;
     fs::create_dir_all(runtime)?;
+    let dxvk_managed = linux || runtime.join(DXVK_MARKER).is_file();
     let manifest_path = runtime.join(MANIFEST);
     let manifest = fs::read_to_string(&manifest_path)
         .map(|text| parse_manifest(&text))
@@ -208,7 +221,7 @@ pub fn sync(game: &Path, runtime: &Path) -> io::Result<usize> {
     // A file the launcher renamed out of the way still counts as present.
     let present =
         |rel: &str| native(runtime, rel).is_file() || native(runtime, &disabled(rel)).is_file();
-    let plan = plan(&source, &present, &manifest);
+    let plan = plan(&source, &present, &manifest, dxvk_managed);
     for rel in &plan.copy {
         let from = native(game, rel);
         let to = native(runtime, rel);
@@ -267,10 +280,16 @@ mod tests {
     #[test]
     fn unchanged_files_are_not_recopied() {
         let source = BTreeMap::from([("SEGA Rally.exe".into(), stamp(10, 20))]);
-        assert!(plan(&source, &|_| true, &source).copy.is_empty());
-        assert_eq!(plan(&source, &|_| false, &source).copy, ["SEGA Rally.exe"]);
+        assert!(plan(&source, &|_| true, &source, false).copy.is_empty());
+        assert_eq!(
+            plan(&source, &|_| false, &source, false).copy,
+            ["SEGA Rally.exe"]
+        );
         let changed = BTreeMap::from([("SEGA Rally.exe".into(), stamp(11, 20))]);
-        assert_eq!(plan(&changed, &|_| true, &source).copy, ["SEGA Rally.exe"]);
+        assert_eq!(
+            plan(&changed, &|_| true, &source, false).copy,
+            ["SEGA Rally.exe"]
+        );
     }
 
     #[test]
@@ -286,11 +305,11 @@ mod tests {
         fs::create_dir_all(game.join("Bootup/video/Rally")).unwrap();
         fs::write(game.join("SEGA Rally.exe"), b"one").unwrap();
         fs::write(game.join("Bootup/video/Rally/SEGA_Logo720p.wmv"), b"vid").unwrap();
-        assert_eq!(sync(&game, &runtime).unwrap(), 2);
+        assert_eq!(sync(&game, &runtime, false).unwrap(), 2);
         fs::write(runtime.join("dxvk.conf"), b"ours").unwrap();
-        assert_eq!(sync(&game, &runtime).unwrap(), 0);
+        assert_eq!(sync(&game, &runtime, false).unwrap(), 0);
         fs::write(game.join("SEGA Rally.exe"), b"two!").unwrap();
-        assert_eq!(sync(&game, &runtime).unwrap(), 1);
+        assert_eq!(sync(&game, &runtime, false).unwrap(), 1);
         assert_eq!(fs::read(runtime.join("dxvk.conf")).unwrap(), b"ours");
         fs::remove_dir_all(game).unwrap();
         fs::remove_dir_all(runtime).unwrap();
@@ -304,7 +323,7 @@ mod tests {
         fs::create_dir_all(native(&game, video).parent().unwrap()).unwrap();
         fs::write(native(&game, video), b"vid").unwrap();
         for launch in 0..2 {
-            let copied = sync(&game, &runtime).unwrap();
+            let copied = sync(&game, &runtime, false).unwrap();
             assert_eq!(copied, usize::from(launch == 0));
             assert_eq!(disable_bootup_videos(&runtime), usize::from(launch == 0));
             assert!(!native(&runtime, video).exists());
@@ -312,7 +331,7 @@ mod tests {
         }
         // A changed source is copied fresh and switched off again.
         fs::write(native(&game, video), b"new video").unwrap();
-        assert_eq!(sync(&game, &runtime).unwrap(), 1);
+        assert_eq!(sync(&game, &runtime, false).unwrap(), 1);
         assert_eq!(disable_bootup_videos(&runtime), 1);
         assert_eq!(
             fs::read(native(&runtime, &disabled(video))).unwrap(),
@@ -329,11 +348,18 @@ mod tests {
             ("DXVK.conf".into(), stamp(1, 1)),
             ("SEGA Rally.exe".into(), stamp(1, 1)),
         ]);
-        let plan = plan(&source, &|_| false, &Listing::new());
-        assert_eq!(plan.copy, ["SEGA Rally.exe"]);
-        assert!(is_owned("d3d9.dll") && is_owned(MANIFEST) && is_owned(".srr-dxvk"));
+        // with our DXVK: d3d9.dll is ours
+        let managed = plan(&source, &|_| false, &Listing::new(), true);
+        assert_eq!(managed.copy, ["SEGA Rally.exe"]);
+        // native Windows: the player's d3d9.dll is a game file like any other
+        let windows = plan(&source, &|_| false, &Listing::new(), false);
+        assert_eq!(windows.copy, ["SEGA Rally.exe", "d3d9.dll"]);
+        for managed in [false, true] {
+            assert!(is_owned(MANIFEST, managed) && is_owned(DXVK_MARKER, managed));
+            assert!(is_owned("dxvk.conf", managed));
+        }
         assert!(
-            !is_owned("Data/d3d9.dll"),
+            !is_owned("Data/d3d9.dll", true),
             "only the top-level slot is ours"
         );
     }
@@ -345,11 +371,28 @@ mod tests {
         fs::create_dir_all(&game).unwrap();
         fs::write(game.join("d3d9.dll"), b"player's wrapper").unwrap();
         fs::write(game.join("SEGA Rally.exe"), b"exe").unwrap();
-        assert_eq!(sync(&game, &runtime).unwrap(), 1);
+        assert_eq!(sync(&game, &runtime, true).unwrap(), 1);
         fs::write(runtime.join("d3d9.dll"), b"dxvk").unwrap();
+        fs::write(runtime.join(DXVK_MARKER), b"").unwrap();
         fs::write(game.join("d3d9.dll"), b"changed wrapper").unwrap();
-        assert_eq!(sync(&game, &runtime).unwrap(), 0);
+        // the marker alone keeps it ours, even without --linux
+        assert_eq!(sync(&game, &runtime, false).unwrap(), 0);
         assert_eq!(fs::read(runtime.join("d3d9.dll")).unwrap(), b"dxvk");
+        fs::remove_dir_all(game).unwrap();
+        fs::remove_dir_all(runtime).unwrap();
+    }
+
+    #[test]
+    fn a_windows_players_own_d3d9_is_copied_and_updated() {
+        let game = temp("windows-game");
+        let runtime = temp("windows-runtime");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("d3d9.dll"), b"reshade").unwrap();
+        assert_eq!(sync(&game, &runtime, false).unwrap(), 1);
+        assert_eq!(fs::read(runtime.join("d3d9.dll")).unwrap(), b"reshade");
+        fs::write(game.join("d3d9.dll"), b"reshade 2").unwrap();
+        assert_eq!(sync(&game, &runtime, false).unwrap(), 1);
+        assert_eq!(fs::read(runtime.join("d3d9.dll")).unwrap(), b"reshade 2");
         fs::remove_dir_all(game).unwrap();
         fs::remove_dir_all(runtime).unwrap();
     }
