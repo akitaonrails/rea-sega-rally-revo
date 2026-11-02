@@ -279,6 +279,12 @@ drift check against v0.3.0 and the shell tests. The single-instance
 decision is tested with a fake; the SDK's mutex and window lookup were not
 exercised with two real launchers.
 
+The README screenshots (`docs/images/launcher-*.jpg`) were retaken with
+this build: Xvfb at 2560x1440, Wine at 96 DPI in a throwaway prefix under
+`.work/`, no game folder (so the Play tab shows the first run), tabs
+switched with XTest clicks. They replace the PNGs, whose Picture tab still
+showed the removed aspect row.
+
 Pending, in the real game (STANDARDS "Clean exit, single instance"):
 
 - **Second start while the window is open** (native Windows and Wine):

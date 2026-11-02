@@ -32,7 +32,7 @@ Add a row before bundling anything new.
 | --- | --- | --- | --- | --- |
 | `crates/srr-launcher/assets/portrait.jpg` | the settings window's art (560×650) | made for this launcher with an AI image tool; the tool and prompt were not recorded | ours, as stated since v0.1.0 (nothing taken from the game) — **provenance to be confirmed by the owner** | — |
 | `packaging/appimage/srr-launcher.png` | the app icon (256×256) | made for this launcher with an AI image tool; tool not recorded | ours, as above — **to be confirmed** | — |
-| `docs/images/launcher-*.png` | screenshots of the settings window | this project (captured headless) | MIT OR Apache-2.0, like the code | — |
+| `docs/images/launcher-*.jpg` | screenshots of the settings window | this project (captured headless) | MIT OR Apache-2.0, like the code | — |
 | README video and poster (hosted outside the repository) | gameplay recording through the launcher | the owner | the owner's | S3 links in the README |
 | Barlow, Barlow Condensed (window fonts, bundled by `rea-launcher-ui`) | fonts | Jeremy Tribby | SIL OFL 1.1 | google.com/fonts (licence file beside the fonts in the SDK's `crates/rea-launcher-ui/assets/fonts`) |
 
