@@ -220,7 +220,7 @@ updated.
 
 ```sh
 cargo test --workspace                                 # host tests
-sh linux/tests/gpu-env.sh && sh linux/tests/game-alive.sh
+for t in linux/tests/*.sh; do sh "$t"; done            # Linux helper tests
 cargo clippy --release --target i686-pc-windows-gnu -- -D warnings
 cargo build --release --target i686-pc-windows-gnu     # needs i686 mingw-w64 and lld
 packaging/appimage/build.sh <package-folder> <output-folder>

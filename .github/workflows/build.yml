@@ -43,9 +43,10 @@ jobs:
           sh linux/tests/game-alive.sh
           sh linux/tests/winebus.sh
           sh linux/tests/supervision.sh
+          sh linux/tests/layout.sh
 
       - name: Shell syntax
-        run: sh -n linux/srr-play packaging/appimage/AppRun packaging/appimage/build.sh
+        run: sh -n linux/srr-play sdk/rea-play.sh packaging/appimage/AppRun packaging/appimage/build.sh
 
       - name: Lint (Windows target)
         run: cargo clippy --release --target i686-pc-windows-gnu --workspace --locked -- -D warnings
@@ -63,6 +64,7 @@ jobs:
           cp target/i686-pc-windows-gnu/release/SRRLauncher.exe \
              README.md THIRD_PARTY.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
           cp -r linux "dist/$name/linux"
+          cp sdk/rea-play.sh "dist/$name/linux/rea-play.sh"
           { read -r url digest; read -r licence_url licence_digest; } < <(grep -v '^#' packaging/dxvk.txt)
           curl -fsSL "$url" -o dxvk.tar.gz
           echo "$digest  dxvk.tar.gz" | sha256sum -c -

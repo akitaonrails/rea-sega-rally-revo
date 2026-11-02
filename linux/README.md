@@ -1,7 +1,10 @@
 # Linux helper
 
 `srr-play` runs the 32-bit `SRRLauncher.exe` under Wine with everything the
-game needs already wired:
+game needs already wired. It is a short configuration of the shared
+rea-launcher-sdk play library, `rea-play.sh`, which ships beside it in the
+zip and the AppImage (in this repository it is the vendored
+`sdk/rea-play.sh`):
 
 - a private Wine prefix (default `~/.local/share/srr-launcher/prefix`)
 - Wine's SDL controller bridge configured for this game (`Map Controllers=1`,
@@ -44,17 +47,16 @@ A GPU choice you already made (`VK_DRIVER_FILES`, `VK_ICD_FILENAMES`,
 | `SRR_RUN` | empty | prefix for the wine commands, e.g. `distrobox enter gaming --` |
 | `SRR_WAIT` | unset | run in the foreground (used by the AppImage) |
 | `SRR_WINETRICKS` | `auto` | `off` skips the winetricks bootstrap |
-| `SRR_ICD_DIR` | `/etc/vulkan/icd.d /usr/share/vulkan/icd.d` | Vulkan ICD directories (tests) |
-| `SRR_SYSFS` | `/sys` | sysfs root (tests) |
 
 State lives in `~/.config/srr-launcher` (`running.pid`, `play.log`,
 `settings.log`, `inner.sh`). `running.pid` holds the session leader's pid
 and start time, so a reused pid or a game started some other way is never
 mistaken for this launch, and `stop` signals only that session's process
 group. The launcher path reaches `inner.sh` as an argument, never as
-generated shell text. Run `sh linux/tests/gpu-env.sh` and
-`sh linux/tests/game-alive.sh`, `sh linux/tests/winebus.sh` and
-`sh linux/tests/supervision.sh` to exercise the host-side helpers.
+generated shell text. Run each `linux/tests/*.sh` with `sh` to exercise
+the helper (the tests point the library's test seams, `REA_ICD_DIRS`,
+`REA_SYSFS` and `REA_PROC`, at fake trees; they replace the old
+`SRR_ICD_DIR`/`SRR_SYSFS` test variables).
 
 ## Steam
 

@@ -4,8 +4,10 @@
 # srr-play stop      end the game
 # srr-play status    running or idle
 #
-# What this wrapper wires up (each line was a real hurdle on the reference
-# host — see docs/RESEARCH.md):
+# The session, lock, GPU choice and prefix handling come from the shared
+# rea-launcher-sdk play library (rea-play.sh). What this game wires up on
+# top (each line was a real hurdle on the reference host — see
+# docs/RESEARCH.md):
 #  - a private Wine prefix at ~/.local/share/srr-launcher/prefix
 #  - Wine's SDL controller bridge for this game (Map Controllers=1) and
 #    duplicate raw-input devices disabled (winebus registry)
@@ -17,272 +19,74 @@
 #  - no gamescope of its own: this DXVK title on hybrid hosts routes
 #    Vulkan to the iGPU inside gamescope (the Sega Rally Revo lesson);
 #    the launcher's isolated Wine desktop handles fullscreen instead
+#
+# Environment: SRR_PREFIX, SRR_LAUNCHER, SRR_RUN (e.g. "distrobox enter
+# gaming --"), SRR_WAIT (the AppImage), SRR_WINETRICKS=off.
 set -u
-HERE=$(dirname "$(readlink -f "$0")")
-PREFIX=${SRR_PREFIX:-$HOME/.local/share/srr-launcher/prefix}
-LAUNCHER=${SRR_LAUNCHER:-}
-if [ -z "$LAUNCHER" ]; then
-  for p in "$HERE/SRRLauncher.exe" "$HERE/../SRRLauncher.exe"; do
-    [ -f "$p" ] && LAUNCHER=$(readlink -f "$p") && break
-  done
+
+# The library: next to this script in a package, else the vendored copy.
+_here=$(dirname "$(readlink -f "$0")")
+if [ -f "$_here/rea-play.sh" ]; then
+  . "$_here/rea-play.sh"
+elif [ -f "$_here/../sdk/rea-play.sh" ]; then
+  . "$_here/../sdk/rea-play.sh"
+elif [ -n "${SRR_PLAY_FUNCTIONS_ONLY:-}" ] && [ -f "$_here/../../sdk/rea-play.sh" ]; then
+  . "$_here/../../sdk/rea-play.sh"   # sourced by linux/tests/*.sh
+else
+  echo "rea-play.sh not found next to $0 or in ../sdk (run scripts/sdk-sync)" >&2
+  exit 1
 fi
-RUN=${SRR_RUN:-}
-STATE=$HOME/.config/srr-launcher
-mkdir -p "$STATE" "$PREFIX"
-LOCK=$STATE/running.pid
-# True while a game process is alive. Zombies do not count: pgrep lists
-# them, and a crashed or killed session can leave one behind, which would
-# otherwise block every later start ("already running") and hang the wait
-# loop. Also written into inner.sh, so it must stay self-contained.
-GAME_ALIVE='game_alive() {
-  for name in "SEGA Rally.exe" "SEGA Rally_SSE1"; do
-    for pid in $(pgrep -x "$name"); do
-      state=$(sed "s/.*) //" "${SRR_PROC:-/proc}/$pid/stat" 2>/dev/null | cut -d" " -f1)
-      [ -n "$state" ] && [ "$state" != Z ] && return 0
-    done
-  done
-  return 1
-}'
-eval "$GAME_ALIVE"
 
-# Print session id and process start time from /proc. Text after the final
-# ") " avoids comm fields that contain spaces or parentheses.
-proc_stat() {
-  [ -r "/proc/$1/stat" ] || return 1
-  stat=$(cat "/proc/$1/stat") || return 1
-  rest=${stat##*) }
-  set -- $rest
-  [ "$#" -ge 20 ] || return 1
-  printf '%s %s\n' "$4" "${20}"
-}
-
-read_lock() {
-  [ -r "$LOCK" ] || return 1
-  IFS=' ' read -r LOCK_PID LOCK_START < "$LOCK" || return 1
-  case "$LOCK_PID" in ''|*[!0-9]*) return 1 ;; esac
-  case "$LOCK_START" in ''|*[!0-9]*) return 1 ;; esac
-}
-
-# A lock alone proves nothing: the pid must still be the same setsid session
-# leader with the same start time recorded when we spawned it, so a reused
-# pid or a game started some other way never counts as this launch.
-session_valid() {
-  read_lock || return 1
-  stats=$(proc_stat "$LOCK_PID") || return 1
-  [ "$stats" = "$LOCK_PID $LOCK_START" ]
-}
-
-# v0.1.x wrote the pid alone. A live pid from such a lock is still taken
-# as running, so an upgrade mid-session does not start a second game.
-legacy_session() {
-  [ -r "$LOCK" ] || return 1
-  IFS=' ' read -r LEGACY_PID LEGACY_REST < "$LOCK" || return 1
-  [ -z "$LEGACY_REST" ] || return 1
-  case "$LEGACY_PID" in ''|*[!0-9]*) return 1 ;; esac
-  kill -0 "$LEGACY_PID" 2>/dev/null
-}
-
-running() { session_valid || legacy_session; }
-
-# Choose the Vulkan driver for DXVK on hybrid-GPU hosts. When an NVIDIA GPU
-# is present and its ICD coexists with another vendor's ICD, pin NVIDIA:
-# mixed enumeration order after a driver update otherwise lands DXVK on the
-# integrated GPU and the game presents black frames while looking perfectly
-# alive. An NVIDIA ICD alone (a leftover package, no NVIDIA card) is never
-# pinned. Otherwise fall back to the sysfs PRIME heuristic. A driver choice
-# the caller already made always wins.
-# SRR_ICD_DIR (space-separated dirs) and SRR_SYSFS replace the host paths
-# in tests.
-nvidia_present() {
-  [ -d "$1/module/nvidia" ] && return 0
-  for v in "$1"/bus/pci/devices/*/vendor; do
-    [ "$(cat "$v" 2>/dev/null)" = 0x10de ] && return 0
-  done
-  return 1
-}
-
-gpu_env() {
-  [ -n "${VK_DRIVER_FILES:-}${VK_ICD_FILENAMES:-}${DRI_PRIME:-}${__NV_PRIME_RENDER_OFFLOAD:-}" ] && return
-  sys=${SRR_SYSFS:-/sys}
-  nvidia= others=
-  for dir in ${SRR_ICD_DIR:-/etc/vulkan/icd.d /usr/share/vulkan/icd.d}; do
-    for f in "$dir"/*.json; do
-      [ -e "$f" ] || continue
-      case "${f##*/}" in
-        *nvidia*) nvidia=${nvidia:+$nvidia:}$f ;;
-        *) others="$others$f " ;;
-      esac
-    done
-  done
-  if [ -n "$nvidia" ] && [ -n "$others" ] && nvidia_present "$sys"; then
-    # VK_ICD_FILENAMES is deprecated but still the only name older loaders read.
-    echo "VK_DRIVER_FILES=$nvidia VK_ICD_FILENAMES=$nvidia"
-    return
-  fi
-  n=0 boot= boot_vram=0 other_vram=0
-  for d in "$sys"/class/drm/card*; do
-    case "${d##*/}" in *-*) continue ;; esac
-    [ -r "$d/device/vendor" ] || continue
-    n=$((n + 1))
-    vram=$(cat "$d/device/mem_info_vram_total" 2>/dev/null || echo 0)
-    if [ "$(cat "$d/device/boot_vga" 2>/dev/null)" = 1 ]; then
-      boot=$(cat "$d/device/vendor"); boot_vram=$vram
-    elif [ "$vram" -gt "$other_vram" ]; then
-      other_vram=$vram
-    fi
-  done
-  if [ "$n" -ge 2 ] && { [ "$boot" = 0x8086 ] || [ "$other_vram" -gt "$boot_vram" ]; }; then
-    echo "DRI_PRIME=1"
-  fi
-}
-
-# Wine in the private prefix (never shadows the wine command itself).
-prefix_wine() { $RUN env WINEPREFIX="$PREFIX" ${GPU:-} wine "$@"; }
-
-# Wine's input stack, tuned for this game (the reference setup): Wine's
-# SDL-backed XInput device is what the game sees, raw evdev/hidraw devices
-# are kept out of the way. The names are exactly what winebus.sys reads
-# (DisableHidraw/DisableInput, no space). SRRLauncher.exe seeds the same
-# values itself under any Wine/Proton; seeding here as well means the bus
-# already starts with them on a brand-new prefix. Only absent values are
-# written, then the prefix shuts down so the next start re-reads them.
-# Runs once per prefix (the v2 marker replaces the old, misspelled seed).
-WINEBUS='HKLM\System\CurrentControlSet\Services\winebus'
-seed_winebus() {
-  [ -f "$PREFIX/.srr-winebus-v2" ] && return 0
-  echo "configuring Wine's controller bridge (once)"
-  for name in DisableHidraw DisableInput "Enable SDL" "Map Controllers"; do
-    prefix_wine reg query "$WINEBUS" /v "$name" >/dev/null 2>&1 ||
-      prefix_wine reg add "$WINEBUS" /v "$name" /t REG_DWORD /d 1 /f >/dev/null 2>&1
-  done
-  $RUN env WINEPREFIX="$PREFIX" wineserver -w 2>/dev/null
-  : > "$PREFIX/.srr-winebus-v2"
-}
+REA_APP=srr-launcher
+REA_EXE_NAME=SRRLauncher.exe
+REA_EXE_HINT=SRR_LAUNCHER
+REA_EXE=${SRR_LAUNCHER:-}
+REA_PREFIX=${SRR_PREFIX:-}
+REA_RUN=${SRR_RUN:-}
+REA_WAIT=${SRR_WAIT:-}
+REA_ALWAYS_WAIT=0                 # detached unless SRR_WAIT (the AppImage)
+REA_CFG_APPDATA=SRRLauncher
+REA_GAMESCOPE=off                 # see the header: the isolated Wine desktop instead
+REA_GPU_ICD_PIN=1                 # pin NVIDIA's Vulkan ICD on hybrid hosts
+REA_PLAY_ARGS="--no-window --linux"
+REA_SDL_ENV=SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1
+REA_SDL_SETTINGS=0
+# The launcher can return before the game (the isolated Wine desktop).
+REA_GAME_PROCS='SEGA Rally.exe|SEGA Rally_SSE1'
+# The v2 marker replaces an old, misspelled seed: such prefixes are seeded
+# again once, prefixes seeded with the right names are not.
+REA_WINEBUS_MARKER=.srr-winebus-v2
+REA_DIRECT_NOTE="starting (isolated Wine desktop, frame limit via DXVK)"
 
 # The offline DirectX runtime equivalents: the community setup installs
 # d3dx9 + directplay (+ d3dcompiler_47 as a DXVK safeguard) to stop a
 # repeatable main-menu access violation. Best effort — only when
-# winetricks is available; set SRR_WINETRICKS=off to skip.
+# winetricks is available; SRR_WINETRICKS=off skips it. Runs under
+# rea_once: a skip returns non-zero, so it is tried again next time.
 seed_winetricks() {
-  [ -f "$PREFIX/.srr-tricks" ] && return 0
-  [ "${SRR_WINETRICKS:-auto}" = "off" ] && return 0
-  $RUN sh -c "command -v winetricks" >/dev/null 2>&1 || {
+  [ "${SRR_WINETRICKS:-auto}" = "off" ] && return 1
+  rea_run sh -c "command -v winetricks" >/dev/null 2>&1 || {
     echo "note: winetricks not found; if the game crashes at the main menu,"
     echo "install winetricks (d3dx9 directplay d3dcompiler_47) and rerun"
-    return 0
+    return 1
   }
   echo "installing d3dx9 directplay d3dcompiler_47 (once)"
-  $RUN env WINEPREFIX="$PREFIX" winetricks -q d3dx9 directplay d3dcompiler_47 >/dev/null 2>&1
-  : > "$PREFIX/.srr-tricks"
+  rea_run env WINEPREFIX="$REA_PREFIX" winetricks -q d3dx9 directplay d3dcompiler_47 >/dev/null 2>&1
+  return 0
 }
 
+# Both the window and the game read pads through Wine's bus, so the prefix
+# is prepared before either starts. SRRLauncher.exe seeds the same winebus
+# values itself under any Wine/Proton; seeding here as well means the bus
+# already starts with them on a brand-new prefix.
 bootstrap() {
-  seed_winebus
-  seed_winetricks
+  rea_seed_winebus
+  rea_once .srr-tricks seed_winetricks || true   # skipped: retried next time
 }
+rea_hook_before_settings() { bootstrap; }
+rea_hook_before_start() { bootstrap; }
 
-start() {
-  if [ -z "$LAUNCHER" ] || [ ! -f "$LAUNCHER" ]; then
-    echo "SRRLauncher.exe not found next to srr-play (or set SRR_LAUNCHER)"; exit 1
-  fi
-  bootstrap
-  inner=$STATE/inner.sh
-  # The launcher is positional parameter 1, never shell source. After the
-  # launcher returns, wait for the game itself (the isolated Wine desktop
-  # can hand back early), then clean only our prefix.
-  {
-    echo '#!/bin/sh'
-    echo "$GAME_ALIVE"
-    cat <<'INNER'
-trap 'wineserver -k; exit' INT TERM HUP
-wine "$1" --no-window --linux
-sleep 3
-while game_alive; do sleep 1; done
-wineserver -k
-INNER
-  } > "$inner"
-  chmod +x "$inner"
-  export SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS="${SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS:-1}"
-  echo "starting (isolated Wine desktop, frame limit via DXVK)"
-  launch sh "$inner" "$LAUNCHER"
-}
-
-launch_interrupted() {
-  trap - EXIT HUP INT TERM
-  if session_valid; then
-    kill -TERM "-$LOCK_PID" 2>/dev/null || true
-    # Let inner.sh run its own cleanup (wineserver -k) before we leave.
-    wait "$LOCK_PID" 2>/dev/null
-  fi
-  rm -f "$LOCK"
-  exit 143
-}
-
-# The child gets its own session (pid + start time in the lock) so stop can
-# address only this launch. SRR_WAIT (the AppImage) waits and cleans the
-# lock on natural exit or interruption; otherwise the game runs detached
-# and a stale lock is recognised by its start time.
-launch() {
-  setsid $RUN env WINEPREFIX="$PREFIX" ${GPU:-} "$@" > "$STATE/play.log" 2>&1 < /dev/null &
-  pid=$!
-  stats=$(proc_stat "$pid") || {
-    [ -n "${SRR_WAIT:-}" ] && { wait "$pid"; return "$?"; }
-    return 0
-  }
-  printf '%s %s\n' "$pid" "${stats#* }" > "$LOCK"
-  [ -n "${SRR_WAIT:-}" ] || return 0
-  trap 'rm -f "$LOCK"' EXIT
-  trap 'launch_interrupted' HUP INT TERM
-  wait "$pid"
-  rc=$?
-  rm -f "$LOCK"
-  trap - EXIT HUP INT TERM
-  return "$rc"
-}
-
-# Revalidate immediately before signaling: stale/reused pids and game
-# processes this script did not start are never targets. Then shut down
-# our private prefix's wineserver (nothing else uses it).
-stop_session() {
-  if session_valid; then
-    kill -TERM "-$LOCK_PID" 2>/dev/null || true
-  elif legacy_session; then
-    # v0.1.x stopped its launch the same way (the pid was a setsid leader).
-    kill -TERM "$LEGACY_PID" 2>/dev/null || true
-  fi
-  rm -f "$LOCK"
-  $RUN env WINEPREFIX="$PREFIX" wineserver -k 2>/dev/null
-}
-
-settings() {
-  bootstrap
-  prefix_wine "$LAUNCHER" --settings --linux 2>"$STATE/settings.log"
-  rc=$?
-  $RUN env WINEPREFIX="$PREFIX" wineserver -w 2>/dev/null
-  case $rc in
-    0|4) return 0 ;;
-    3) echo "settings window closed without Play; nothing started" ;;
-    *) echo "settings window failed (exit $rc); see $STATE/settings.log" ;;
-  esac
-  return 1
-}
-
+rea_init || exit 1
+# Tests load the configuration and hooks without running anything.
 [ -n "${SRR_PLAY_FUNCTIONS_ONLY:-}" ] && return 0
-GPU=$(gpu_env)
-[ -n "$GPU" ] && echo "GPU: $GPU"
-case "${1:-}" in
-  "")
-    if running; then echo "already running"; exit 0; fi
-    if [ -z "$LAUNCHER" ] || [ ! -f "$LAUNCHER" ]; then
-      echo "SRRLauncher.exe not found next to srr-play (or set SRR_LAUNCHER)"; exit 1
-    fi
-    settings || exit 0
-    start ;;
-  --play|start)
-    if running; then echo "already running"; else start; fi ;;
-  status) if running; then echo running; else echo idle; fi ;;
-  stop)
-    stop_session
-    echo stopped ;;
-  *) echo "usage: $0 [--play|stop|status]"; exit 2 ;;
-esac
+rea_main "$@"

@@ -32,7 +32,7 @@ rm -rf "$APPDIR/usr/lib/wine/include" "$APPDIR/usr/lib/wine/share/man"
 for tool in function_grep.pl widl winebuild winecpp winedump wineg++ winegcc winemaker wmc wrc msidb; do
   rm -f "$APPDIR/usr/lib/wine/bin/$tool"
 done
-cp "$PKG/SRRLauncher.exe" "$PKG/linux/srr-play" "$APPDIR/usr/lib/srr/"
+cp "$PKG/SRRLauncher.exe" "$PKG/linux/srr-play" "$PKG/linux/rea-play.sh" "$APPDIR/usr/lib/srr/"
 cp "$PKG/linux/d3d9.dll" "$APPDIR/usr/lib/srr/linux/"
 mkdir -p "$APPDIR/usr/share/doc/wine" "$APPDIR/usr/share/doc/dxvk"
 cp "$HERE"/wine/* "$APPDIR/usr/share/doc/wine/"
