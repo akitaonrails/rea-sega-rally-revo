@@ -626,7 +626,7 @@ mod native {
         let screen = display::screen_size();
         let fit = WindowFit::new(SIZE, wine, screen, native);
         let zoom = fit.zoom();
-        let options = fit.native_options("Sega Rally Revo");
+        let options = fit.native_options(srr_launcher::instance::WINDOW_TITLE);
         let host = Host {
             screen,
             linux,
@@ -657,7 +657,7 @@ mod native {
         let window = Window::new(settings_path.to_path_buf(), saved.map(str::to_string), host);
         let outcome = window.outcome.clone();
         eframe::run_native(
-            "Sega Rally Revo",
+            srr_launcher::instance::WINDOW_TITLE,
             options,
             Box::new(move |cc| {
                 theme::install_with(&cc.egui_ctx, &PALETTE, &METRICS);

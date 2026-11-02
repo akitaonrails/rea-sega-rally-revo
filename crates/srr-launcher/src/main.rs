@@ -41,7 +41,7 @@ mod app {
     use srr_launcher::config::{self, Settings};
     use srr_launcher::edition::{self, GameEditions};
     use srr_launcher::plan::{self, Env};
-    use srr_launcher::{directx, gamecfg, patches, runtime};
+    use srr_launcher::{directx, gamecfg, instance, patches, runtime};
 
     use crate::ui;
 
@@ -231,6 +231,27 @@ mod app {
                 return Ok(0);
             }
             Err(message) => return Err(message),
+        };
+        // One launcher at a time, held until the game exits: a second
+        // start brings the window forward or refuses to play.
+        let _instance = if instance::needs_instance(&cli.switches) {
+            match rea_launcher_win32::instance::single(instance::NAME) {
+                Ok(guard) => Some(guard),
+                Err(running) => {
+                    let second = instance::Second::of(|| {
+                        running.bring_to_front(rea_launcher_win32::instance::Window::Title(
+                            instance::WINDOW_TITLE,
+                        ))
+                    });
+                    log_line(&format!("another launcher is running: {second:?}"));
+                    if let Some(message) = second.message() {
+                        report("Sega Rally Revo launcher", message, false);
+                    }
+                    return Ok(second.exit_code());
+                }
+            }
+        } else {
+            None
         };
         let settings_only = cli.has("--settings");
         let linux = cli.has("--linux");

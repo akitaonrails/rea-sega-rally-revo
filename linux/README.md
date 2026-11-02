@@ -33,7 +33,8 @@ srr-play stop       # end this launch's session and the prefix's Wine server
 srr-play status     # running or idle
 ```
 
-Exit codes of the settings run: 0 play, 3 window closed, 4 no window. When
+Exit codes of the settings run: 0 play, 3 window closed, 4 no window, 5
+already running (another launcher is waiting for the game). When
 the window closes without Play, `srr-play` says so and starts nothing.
 
 ## Environment

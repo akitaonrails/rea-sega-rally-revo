@@ -268,3 +268,32 @@ Pending, in the real game:
   Play tab, the photo credit band, and the lighter control borders —
   judge them in a deliberate window; `docs/images/launcher-picture.png`
   still shows the old aspect row and should be recaptured.
+
+## Unreleased — rea-launcher-sdk v0.3.0 (needs real-game checks)
+
+Verified (no game run, no window opened): host tests including the
+headless window tests, the same tests under Wine (`sdk/scripts/wine-test`,
+i686), the golden snapshots (only `--help`'s switch padding changed), the
+lld and import checks on the i686 release build, `cargo deny`, the sdk/
+drift check against v0.3.0 and the shell tests. The single-instance
+decision is tested with a fake; the SDK's mutex and window lookup were not
+exercised with two real launchers.
+
+Pending, in the real game (STANDARDS "Clean exit, single instance"):
+
+- **Second start while the window is open** (native Windows and Wine):
+  the first window comes forward, no second window, exit code 0.
+- **Second start while the game runs** from the launcher: the message
+  "already running … Quit the game first", exit code 5, no second game.
+  Under Wine with srr-play's isolated desktop the launcher can return
+  before the game; there the helper's session lock is what refuses (check
+  `srr-play` twice, and `srr-play status`).
+- **Every way of quitting** leaves no `SEGA Rally*.exe`, launcher,
+  `wineserver` or gamescope behind within a few seconds: the game's own
+  Quit, Alt+F4 / window close, Steam's Stop, `srr-play stop` and Ctrl+C.
+  The launcher only waits for the game (it never stops it), so if the game
+  ignores `WM_CLOSE`, it needs a close hook (SDK `rea-launcher-close-hook`).
+- **DirectX 9 download** through the window after the move to the SDK's
+  `install_with`: progress through Unpacking, the DLLs in
+  `directx\directx_Jun2010_redist\` (was `directx\d3dx9\` in unreleased
+  builds; an old folder there is now unused and can be deleted), Remove.
