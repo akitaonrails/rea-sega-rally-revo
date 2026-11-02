@@ -12,7 +12,7 @@ This project contains no game files: you need your own copy of the game.
 > Played end to end with the Linux AppImage on a 4K desktop, menus and a
 > full race with a gamepad. Native Windows 10/11, the Steam Deck, Steam's
 > Proton and ultra-wide screens are not tested yet: reports are welcome
-> ([test-report form](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=test-report.yml)).
+> ([bug-report form](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=bug-report.yml)).
 
 [![Video: the launcher starts Sega Rally Revo at 4K on Linux, then a Safari race driven with a gamepad (click to play)](https://new-uploads-akitaonrails.s3.us-east-2.amazonaws.com/2026/11/02/sega-rally-revo-launcher-poster.jpg)](https://new-uploads-akitaonrails.s3.us-east-2.amazonaws.com/2026/11/02/sega-rally-revo-launcher.mp4)
 
@@ -49,7 +49,7 @@ German, Spanish, Italian and Polish release). The launcher plays the clean
 The launcher checks the exact game files before it changes anything. A
 version it doesn't know is refused with a code (its SHA-256) and a link to
 report it on the
-[test-report form](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=test-report.yml).
+[unknown-edition form](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=unknown-edition.yml).
 Report the code, never the game files. The retail DVD's own
 `SEGA Rally.exe` isn't known yet.
 
@@ -243,7 +243,7 @@ under HKCU) the way the game's installer would.
 - **"This launcher supports the Sega Rally Revo PC v4.0.6.0 build"**: your
   game files are not a version the launcher knows. The message shows a
   code (SHA-256); report it on the
-  [test-report form](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=test-report.yml)
+  [unknown-edition form](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=unknown-edition.yml)
   so the version can be added.
 - **The game doesn't start on Windows ("d3dx9_… .dll was not found") or
   crashes at the main menu**: press **Download** under *Microsoft DirectX 9
@@ -257,7 +257,7 @@ under HKCU) the way the game's installer would.
 - **"Sega Rally Revo is already running from this launcher"**: the game
   from an earlier start is still running. Quit it first.
 - **Anything else**: run `SRRLauncher --check`, then open an issue with the
-  [test-report form](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=test-report.yml)
+  [bug-report form](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=bug-report.yml)
   and attach `launcher.log` (remove personal paths). Never attach game
   files.
 
@@ -374,8 +374,8 @@ and `srr-play`'s settings.
   the SDK's. Not sure? Open it here and it will be moved.
 - Never patch `sdk/` or copy SDK code here: fix the SDK and bump the tag.
 - Never attach game files (executables, saves, data) to an issue.
-- Test reports are welcome: the
-  [test-report form](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=test-report.yml).
+- Test reports are welcome, working or not: the
+  [bug-report form](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=bug-report.yml).
 
 ## Credits
 

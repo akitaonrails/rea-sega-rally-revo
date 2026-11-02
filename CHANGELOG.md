@@ -23,6 +23,10 @@
 - CI: the SDK's lld and import checks replace `tests/imports.rs`, the
   x86_64 Windows target links with lld too, and a weekly workflow opens a
   pull request when a new SDK version is out.
+- Issue forms: a **Bug report** form (test reports that everything works
+  are welcome there too) and an **Unknown edition** form replace the test
+  report. The message for an unknown game version links the Unknown
+  edition form, and a link sends shared-code bugs to rea-launcher-sdk.
 - `CLAUDE.md` and `AGENTS.md` point to the SDK's standards instead of
   repeating them. The stutter fix's clean-room rewrite is recorded as an
   owner decision.

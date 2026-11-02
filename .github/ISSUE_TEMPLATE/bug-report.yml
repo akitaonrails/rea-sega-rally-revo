@@ -1,14 +1,13 @@
-name: Test report
-description: Tell us how SRRLauncher runs Sega Rally Revo on your PC, working or not.
-title: "SRR test report: "
-labels: ["test report"]
+name: Bug report
+description: "SRRLauncher.exe does not run Sega Rally Revo as it should (test reports welcome too)."
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Reports that everything works are useful too. Never attach SEGA Rally.exe,
-        SEGA Rally_SSE1.exe, DLLs, saves, media or any other game files. Remove
-        usernames and personal game/runtime paths from settings and logs.
+        Thank you for the report. Reports that everything works are useful too. Never attach
+        SEGA Rally.exe, SEGA Rally_SSE1.exe, DLLs, saves, media or any other game files.
+        Remove usernames and personal paths from settings and logs.
   - type: dropdown
     id: system
     attributes:
@@ -39,16 +38,18 @@ body:
         - Clean SEGA Rally_SSE1.exe (stutter fix available)
         - Full-rip NoDVD SEGA Rally.exe
         - Both
-        - Rejected as unknown (SHA-256 in the log below)
+        - Rejected as unknown (use the Unknown edition form instead)
   - type: textarea
-    id: hashes
+    id: sha256
     attributes:
-      label: Executable SHA-256
+      label: SHA-256 of SEGA Rally.exe and SEGA Rally_SSE1.exe
       description: |
-        The lines launcher.log writes for SEGA Rally.exe and SEGA Rally_SSE1.exe
-        (they start with the file name and end with "SHA-256 …"). An unknown build
-        is how new editions get supported; never attach the executable itself.
+        The lines launcher.log writes for SEGA Rally.exe and SEGA Rally_SSE1.exe (they start
+        with the file name and end with "SHA-256 …"). Or: Windows `certutil -hashfile "SEGA Rally.exe" SHA256`,
+        Linux `sha256sum "SEGA Rally.exe"`. Never attach the executable itself.
       render: text
+    validations:
+      required: true
   - type: input
     id: hardware
     attributes:
@@ -68,21 +69,25 @@ body:
         - label: Saves and settings survived another launch
         - label: The game closed cleanly
   - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: What you did, what you expected and what happened instead (or "everything worked").
+    validations:
+      required: true
+  - type: textarea
     id: settings
     attributes:
       label: Settings used
       description: The look and anything you changed, or launcher.cfg without personal paths.
   - type: textarea
-    id: problems
-    attributes:
-      label: What went wrong (if anything)?
-      description: What you did, what you expected and what happened.
-  - type: textarea
     id: log
     attributes:
       label: launcher.log
       description: |
-        Windows: %LOCALAPPDATA%\SRRLauncher\launcher.log. Under Wine/Proton it is inside the prefix
-        (srr-play / AppImage prefix: ~/.local/share/srr-launcher/prefix).
+        Windows: %LOCALAPPDATA%\SRRLauncher\launcher.log. Under Wine or Proton it is inside
+        the prefix (srr-play and the AppImage: ~/.local/share/srr-launcher/prefix).
         Remove personal paths before posting.
       render: text
+    validations:
+      required: true

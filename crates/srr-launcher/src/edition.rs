@@ -35,7 +35,7 @@ pub const LAUNCHER_EXE: &str = "SEGARallyLauncher.exe";
 
 /// Where players report an executable the launcher does not know.
 pub const REPORT_URL: &str =
-    "https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=test-report.yml";
+    "https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=unknown-edition.yml";
 
 /// The clean `SEGA Rally_SSE1.exe` (file version 4.0.6.0, 3,727,360
 /// bytes). Matches the reference build of the community stutter fix (MD5
