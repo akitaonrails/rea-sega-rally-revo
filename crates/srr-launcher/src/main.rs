@@ -407,24 +407,9 @@ mod app {
 
         // The DirectX 9 files the player downloaded, if any.
         let directx_dir = download::installed(&directx::pin(), &directx_root());
-        let placed = directx::place(&game, &runtime_dir, directx_dir.as_deref())
-            .map_err(|error| format!("cannot place the DirectX 9 files: {error}"))?;
-        if !placed.installed.is_empty() {
-            log_line(&format!(
-                "directx: {} D3DX9 file(s) in the private copy",
-                placed.installed.len()
-            ));
-        }
-        for name in &placed.not_ours {
-            log_line(&format!(
-                "directx: {name} in the private copy is not ours; kept"
-            ));
-        }
-        if !placed.removed.is_empty() {
-            log_line(&format!(
-                "directx: {} file(s) taken out of the private copy",
-                placed.removed.len()
-            ));
+        let directx_files = directx::for_launch(&game, &runtime_dir, directx_dir.as_deref());
+        for line in &directx_files.log {
+            log_line(line);
         }
 
         // The game's own configuration, written the way the original .NET
@@ -457,10 +442,7 @@ mod app {
                 .ok()
                 .and_then(|bytes| gamecfg::resolution_in(bytes)),
             dll_overrides: std::env::var("WINEDLLOVERRIDES").ok(),
-            directx: directx_dir
-                .as_deref()
-                .map(directx::dlls)
-                .unwrap_or_default(),
+            directx: directx_files.dlls.clone(),
             runtime: runtime_dir.display().to_string(),
         };
         let mut plan = plan::plan(&settings, &editions, &env);

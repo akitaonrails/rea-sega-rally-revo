@@ -169,6 +169,9 @@ pub fn override_names(dlls: &[String]) -> Vec<String> {
 pub struct Placed {
     /// In the private copy now, by file name.
     pub installed: Vec<String>,
+    /// Already in the private copy with the same bytes and recorded in
+    /// the ledger: not written again.
+    pub unchanged: Vec<String>,
     /// Left alone because the private copy holds someone else's file.
     pub not_ours: Vec<String>,
     /// Taken out (the component was removed).
@@ -178,29 +181,86 @@ pub struct Placed {
 /// Puts the unpacked DLLs (`dir`, or none) next to the game in the private
 /// copy through the component ledger, and takes out the ones it put there
 /// earlier that are no longer wanted. A player's own file is never
-/// replaced or deleted.
+/// replaced or deleted. A file the ledger already records with the same
+/// bytes is left alone, and the ledger is saved once (SDK `batch`).
 pub fn place(game: &Path, runtime: &Path, dir: Option<&Path>) -> io::Result<Placed> {
     let mut ledger = Ledger::load(game, runtime, LEDGER);
-    let mut placed = Placed::default();
     let wanted = dir.map(dlls).unwrap_or_default();
-    for name in &wanted {
-        let bytes = fs::read(dir.expect("listed from dir").join(name))?;
-        match ledger.install(name, &bytes, &[])? {
-            Outcome::NotOurs => placed.not_ours.push(name.clone()),
-            _ => placed.installed.push(name.clone()),
+    ledger.batch(|ledger| {
+        let mut placed = Placed::default();
+        for name in &wanted {
+            let bytes = fs::read(dir.expect("listed from dir").join(name))?;
+            let recorded = ledger.names().any(|owned| owned == name);
+            if recorded && fs::read(runtime.join(name)).is_ok_and(|current| current == bytes) {
+                placed.unchanged.push(name.clone());
+                continue;
+            }
+            match ledger.install(name, &bytes, &[])? {
+                Outcome::NotOurs => placed.not_ours.push(name.clone()),
+                _ => placed.installed.push(name.clone()),
+            }
         }
-    }
-    let stale: Vec<String> = ledger
-        .names()
-        .filter(|name| !wanted.iter().any(|w| w.eq_ignore_ascii_case(name)))
-        .map(str::to_string)
-        .collect();
-    for name in stale {
-        if ledger.take_out(&name, &[])? == Outcome::Restored {
-            placed.removed.push(name);
+        let stale: Vec<String> = ledger
+            .names()
+            .filter(|name| !wanted.iter().any(|w| w.eq_ignore_ascii_case(name)))
+            .map(str::to_string)
+            .collect();
+        for name in stale {
+            if ledger.take_out(&name, &[])? == Outcome::Restored {
+                placed.removed.push(name);
+            }
         }
+        Ok(placed)
+    })
+}
+
+/// What a launch does with the DirectX 9 files.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Launch {
+    /// The DLLs Wine is asked to load before its own (`n,b`); empty when
+    /// they could not be placed.
+    pub dlls: Vec<String>,
+    /// Lines for `launcher.log` (warnings start with `warning:`).
+    pub log: Vec<String>,
+}
+
+/// [`place`] for a launch: a failure is a logged warning and the game
+/// starts without the files (Wine's own DirectX 9 pieces, or whatever the
+/// private copy holds), never a refusal to play.
+pub fn for_launch(game: &Path, runtime: &Path, dir: Option<&Path>) -> Launch {
+    let mut launch = Launch::default();
+    match place(game, runtime, dir) {
+        Ok(placed) => {
+            launch.dlls = dir.map(dlls).unwrap_or_default();
+            if !placed.installed.is_empty() {
+                launch.log.push(format!(
+                    "directx: {} D3DX9 file(s) put in the private copy",
+                    placed.installed.len()
+                ));
+            }
+            if !placed.unchanged.is_empty() {
+                launch.log.push(format!(
+                    "directx: {} D3DX9 file(s) already in the private copy",
+                    placed.unchanged.len()
+                ));
+            }
+            for name in &placed.not_ours {
+                launch.log.push(format!(
+                    "directx: {name} in the private copy is not ours; kept"
+                ));
+            }
+            if !placed.removed.is_empty() {
+                launch.log.push(format!(
+                    "directx: {} file(s) taken out of the private copy",
+                    placed.removed.len()
+                ));
+            }
+        }
+        Err(error) => launch.log.push(format!(
+            "warning: cannot place the DirectX 9 files ({error}); the game starts without them"
+        )),
     }
-    Ok(placed)
+    launch
 }
 
 #[cfg(test)]
@@ -350,6 +410,60 @@ mod tests {
         assert_eq!(placed.removed, ["d3dx9_35.dll"]);
         assert!(!runtime.join("d3dx9_35.dll").exists());
         assert!(runtime.join("d3dx9_36.dll").exists());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn place_leaves_recorded_identical_files_alone() {
+        let base = temp("place-same");
+        let (game, runtime, dir) = (base.join("game"), base.join("runtime"), base.join("dlls"));
+        for folder in [&game, &runtime, &dir] {
+            fs::create_dir_all(folder).unwrap();
+        }
+        fs::write(dir.join("d3dx9_35.dll"), b"ms").unwrap();
+        assert_eq!(
+            place(&game, &runtime, Some(&dir)).unwrap().installed,
+            ["d3dx9_35.dll"]
+        );
+        // Every later launch: nothing written.
+        let placed = place(&game, &runtime, Some(&dir)).unwrap();
+        assert!(placed.installed.is_empty(), "{placed:?}");
+        assert_eq!(placed.unchanged, ["d3dx9_35.dll"]);
+        // A changed file in the private copy is ours by the ledger only if
+        // its bytes match; a new download replaces our old one.
+        fs::write(dir.join("d3dx9_35.dll"), b"ms 2").unwrap();
+        let placed = place(&game, &runtime, Some(&dir)).unwrap();
+        assert_eq!(placed.installed, ["d3dx9_35.dll"]);
+        assert_eq!(fs::read(runtime.join("d3dx9_35.dll")).unwrap(), b"ms 2");
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn a_launch_that_cannot_place_the_files_warns_and_goes_on() {
+        let base = temp("place-fails");
+        let (game, runtime, dir) = (base.join("game"), base.join("runtime"), base.join("dlls"));
+        for folder in [&game, &runtime, &dir] {
+            fs::create_dir_all(folder).unwrap();
+        }
+        // An unreadable download: a folder where a DLL should be.
+        fs::create_dir_all(dir.join("d3dx9_35.dll").join("blocked")).unwrap();
+        let launch = for_launch(&game, &runtime, Some(&dir));
+        assert!(
+            launch.dlls.is_empty(),
+            "no n,b override for files not placed"
+        );
+        assert_eq!(launch.log.len(), 1);
+        assert!(launch.log[0].starts_with("warning: cannot place the DirectX 9 files"));
+        assert!(launch.log[0].ends_with("the game starts without them"));
+        // Once it reads, the overrides name every DLL.
+        fs::remove_dir_all(dir.join("d3dx9_35.dll")).unwrap();
+        fs::write(dir.join("d3dx9_35.dll"), b"ms").unwrap();
+        let launch = for_launch(&game, &runtime, Some(&dir));
+        assert_eq!(launch.dlls, ["d3dx9_35.dll"]);
+        assert_eq!(
+            launch.log,
+            ["directx: 1 D3DX9 file(s) put in the private copy"]
+        );
         fs::remove_dir_all(base).unwrap();
     }
 }

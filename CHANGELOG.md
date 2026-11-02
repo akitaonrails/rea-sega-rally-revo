@@ -12,6 +12,10 @@
   launcher window is open; use its Download button" and exits with code 5.
   It used to bring the window forward and exit 0, which a script read as
   a finished download.
+- DirectX 9 files already in the private copy are not written again at
+  each launch. If they cannot be put there (a full disk, a locked file),
+  `launcher.log` gets a warning and the game starts without them instead
+  of the launcher refusing to play.
 - **One launcher at a time.** Starting the launcher again while its window
   is open brings that window forward. While the game is running from it,
   a second start says so and doesn't start another game (exit code 5).
