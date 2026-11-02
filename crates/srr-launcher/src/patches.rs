@@ -4,14 +4,12 @@
 //! the launcher applies them from the pristine bytes in the player's game
 //! folder, all or nothing, never to an unidentified executable.
 //!
-//! - [`PACER`]: the community stutter fix for the clean
-//!   `SEGA Rally_SSE1.exe` (reimplemented from
-//!   stuken/SegaRallyRevoStutterFix, whose reference build is
-//!   byte-identical to this one). Three hooks jump to three code caves:
-//!   at most one pacer thread (the Championship stage-2 judder), a race
-//!   clock sampled from the master clock (the 16/17 ms jitter), and a
-//!   per-frame race-clock refresh. The result is checked against the
-//!   fix's reference SHA-256.
+//! - [`PACER`]: the stutter fix for the clean `SEGA Rally_SSE1.exe`, our
+//!   clean-room implementation ([`crate::pacer`], `docs/PACER-PROVENANCE.md`;
+//!   stuken/SegaRallyRevoStutterFix is credited for the idea and the
+//!   problem analysis only). The result is checked against its SHA-256.
+//!   The community-fixed build ([`SSE1_PACER`]) is recognised as already
+//!   fixed and never patched.
 //! - The aspect sets: the renderer's 16:9 constant (`39 8E E3 3F`) in its
 //!   two aspect tables becomes 21:9 or 32:9 for ultra-wide resolutions,
 //!   the PCGamingWiki/WSGF hex edit at this build's own offsets.
@@ -19,14 +17,15 @@
 //! `docs/RESEARCH.md` explains the sites; `describe()` prints them.
 
 use rea_launcher::identify::hex32;
-use rea_launcher::patch::{self, At, PatchCave, PatchError, PatchSet, PatchSite};
+use rea_launcher::patch::{self, At, PatchError, PatchSet, PatchSite};
 
 use crate::config::Aspect;
 
 /// The clean `SEGA Rally_SSE1.exe` v4.0.6.0 (3,727,360 bytes).
 pub const SSE1_CLEAN: [u8; 32] =
     hex32("22655a54bad6932239ade58325703bd4b5a2020376737748026443fa5aadf76e");
-/// The same build with the stutter fix applied (the fix's reference hash).
+/// The same build with the community stutter fix (stuken's patch.py)
+/// applied by the player: recognised as already fixed, never patched.
 pub const SSE1_PACER: [u8; 32] =
     hex32("4c08c1deae28a329b6588138198556ac8eaded8444d0eb94a1fe2f1ad08f2520");
 /// The NoDVD `SEGA Rally.exe` v4.0.6.0 of the widely mirrored full rip.
@@ -53,85 +52,8 @@ const fn hex<const N: usize>(text: &str) -> [u8; N] {
     out
 }
 
-// Engine sites in the clean SSE1 build; in `.text` the file offset is the
-// virtual address minus the image base 0x400000.
-const SPAWN_HOOK: usize = 0x195_660; // pacer thread spawn
-const TICK_HOOK: usize = 0x195_323; // race-clock tick (+16 ms)
-const MAIN_HOOK: usize = 0x158_895; // main loop, power-poll deadline
-const CAVE1: usize = 0x285_100; // spawn guard
-const CAVE2: usize = 0x285_180; // race-clock tick from the master clock
-const CAVE3: usize = 0x285_200; // main-loop race-clock refresh
-
-const SPAWN_GUARD: [u8; 39] =
-    hex("833da020b40000750a518d042450e95205f1ffc605a420b40001c605a520b40000b801000000c3");
-const RACE_CLOCK: [u8; 57] = hex(
-    "51e80a47f0ff8b152c099500a1280995006a0068e80300005250e851a7e2ff3b05d8709600760ba3d87096008915dc70960059f8e97101f1ff",
-);
-const MAIN_REFRESH: [u8; 34] =
-    hex("3b05d8709600760ba3d87096008915dc7096008bf23b35748c72008bf8e97d36edff");
-
-/// The community stutter fix (see the module docs).
-pub const PACER: PatchSet = PatchSet {
-    name: "pacer",
-    summary: "Removes the microstutter in every race and the judder from Championship stage 2",
-    editions: &[SSE1_CLEAN],
-    sites: &[
-        PatchSite {
-            at: At::Offset(SPAWN_HOOK),
-            original: &[0x51, 0x8D, 0x04, 0x24, 0x50],
-            patched: &[0xE9, 0x9B, 0xFA, 0x0E, 0x00],
-            note: "pacer spawn: jmp to the spawn guard",
-        },
-        PatchSite {
-            at: At::Offset(TICK_HOOK),
-            original: &[0x83, 0x05, 0xD8, 0x70, 0x96, 0x00, 0x10],
-            patched: &[0xE9, 0x58, 0xFE, 0x0E, 0x00, 0x90, 0x90],
-            note: "race-clock tick: jmp to the master-clock tick",
-        },
-        PatchSite {
-            at: At::Offset(MAIN_HOOK),
-            original: &[0x8B, 0xF2, 0x3B, 0x35, 0x74],
-            patched: &[0xE9, 0x66, 0xC9, 0x12, 0x00],
-            note: "main loop: jmp to the race-clock refresh",
-        },
-        PatchSite {
-            at: At::Offset(CAVE1),
-            original: &[0; 39],
-            patched: &SPAWN_GUARD,
-            note: "spawn guard: at most one pacer thread",
-        },
-        PatchSite {
-            at: At::Offset(CAVE2),
-            original: &[0; 57],
-            patched: &RACE_CLOCK,
-            note: "race clock = master clock / 1000, never backwards",
-        },
-        PatchSite {
-            at: At::Offset(CAVE3),
-            original: &[0; 34],
-            patched: &MAIN_REFRESH,
-            note: "race clock refreshed every frame",
-        },
-    ],
-    caves: &[
-        PatchCave {
-            name: "spawn guard",
-            at: At::Offset(CAVE1),
-            len: 39,
-        },
-        PatchCave {
-            name: "race clock",
-            at: At::Offset(CAVE2),
-            len: 57,
-        },
-        PatchCave {
-            name: "main-loop refresh",
-            at: At::Offset(CAVE3),
-            len: 34,
-        },
-    ],
-    results: &[(SSE1_CLEAN, SSE1_PACER)],
-};
+/// The stutter fix: the clean-room implementation in [`crate::pacer`].
+pub use crate::pacer::PACER;
 
 const RATIO_16_9: [u8; 4] = hex("398ee33f");
 const RATIO_21_9: [u8; 4] = hex("26b41740"); // 64/27, 2560x1080
@@ -243,14 +165,6 @@ mod tests {
     use super::*;
     use rea_launcher::patch::testing;
 
-    /// `E9 rel32` from `from` to `to` (file offsets in `.text`).
-    fn jmp(from: usize, to: usize) -> [u8; 5] {
-        let rel = (to as i64 - (from as i64 + 5)) as i32;
-        let mut out = [0xE9, 0, 0, 0, 0];
-        out[1..].copy_from_slice(&rel.to_le_bytes());
-        out
-    }
-
     /// A buffer the size of the clean build with every site's original
     /// bytes in place.
     fn synthetic(set: &PatchSet) -> Vec<u8> {
@@ -265,25 +179,26 @@ mod tests {
     }
 
     #[test]
-    fn hooks_jump_to_their_caves_and_back() {
-        assert_eq!(PACER.sites[0].patched, jmp(SPAWN_HOOK, CAVE1));
-        assert_eq!(&PACER.sites[1].patched[..5], jmp(TICK_HOOK, CAVE2));
-        assert_eq!(PACER.sites[2].patched, jmp(MAIN_HOOK, CAVE3));
-        // Each cave ends with a jmp back past its hook (the spawn guard
-        // returns or resumes inside its own body).
+    fn the_stutter_fix_is_the_clean_room_set() {
+        // The shipped pacer is our clean-room implementation
+        // (docs/PACER-PROVENANCE.md): clean SSE1 in, cb9a5a34…ff65 out.
+        assert_eq!(PACER.name, "pacer");
+        assert_eq!(PACER.editions, &[SSE1_CLEAN]);
         assert_eq!(
-            RACE_CLOCK[RACE_CLOCK.len() - 5..],
-            jmp(CAVE2 + 52, TICK_HOOK + 7)
+            PACER.results,
+            &[(SSE1_CLEAN, crate::pacer::SSE1_CLEANROOM_PACER)]
         );
-        assert_eq!(
-            MAIN_REFRESH[MAIN_REFRESH.len() - 5..],
-            jmp(CAVE3 + 29, 0x158_89F)
-        );
+        assert_eq!(PACER.sites.len(), crate::pacer::SITES.len());
+        // The community-fixed build is still recognised, never patched.
+        assert_eq!(SSE1_PACER, crate::pacer::SSE1_COMMUNITY_PACER);
+        assert!(!PACER.editions.contains(&SSE1_PACER));
     }
 
     #[test]
     fn every_set_passes_the_golden_checks() {
-        for set in ALL {
+        // The pacer has VA sites and its own golden tests on a synthetic
+        // PE (tests/pacer_golden.rs).
+        for set in ALL.iter().filter(|set| set.name != "pacer") {
             testing::assert_golden(set, &synthetic(set));
         }
     }
@@ -291,9 +206,9 @@ mod tests {
     #[test]
     fn unknown_builds_are_refused() {
         // A synthetic file is no known build: nothing is patched.
-        let data = synthetic(&PACER);
+        // (The pacer's refusal of unknown builds: tests/pacer_golden.rs.)
         assert!(matches!(
-            apply(&data, &[&PACER]),
+            apply(&synthetic(&ASPECT_21_SSE1), &[&ASPECT_21_SSE1]),
             Err(PatchError::UnknownEdition { .. })
         ));
         assert!(matches!(

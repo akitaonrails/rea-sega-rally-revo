@@ -9,7 +9,7 @@
 //!   reference for the community stutter fix.
 //! - `SEGA Rally_SSE1.exe` — the SSE1 fallback build. In the same rip this
 //!   file is byte-identical to the clean original, and it is the build the
-//!   community stutter fix targets.
+//!   launcher's (clean-room) stutter fix applies to.
 //!
 //! Unknown executables are refused with their SHA-256 and the issue link,
 //! never patched.
@@ -47,7 +47,8 @@ pub static SSE1_CLEAN_BUILD: Edition = Edition {
     pacer_applied: false,
 };
 
-/// The same executable with the stutter fix already applied.
+/// The same executable with the community stutter fix (stuken's patch.py)
+/// already applied by the player: run as it is, never patched.
 pub static SSE1_PACER_BUILD: Edition = Edition {
     name: "PC v4.0.6.0 (SSE1, stutter fix applied)",
     sha256: SSE1_PACER,

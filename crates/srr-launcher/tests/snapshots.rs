@@ -118,15 +118,19 @@ fn render(
         )
         .unwrap();
         for set in sets {
-            let rows = patch::describe(set, None).unwrap();
-            for row in rows {
+            for site in set.sites {
+                // No PE here: offset sites print their file offset, VA
+                // sites their address (the pacer's).
+                let at = match site.at {
+                    patch::At::Offset(offset) => format!("{offset:#08X}"),
+                    patch::At::Va(va) => format!("VA {va:#08X}"),
+                };
                 writeln!(
                     w,
                     // The patched bytes only: the originals are the game's.
-                    "  {:#08X}: {}  ({})",
-                    row.offset,
-                    hex(row.patched),
-                    row.note
+                    "  {at}: {}  ({})",
+                    hex(site.patched),
+                    site.note
                 )
                 .unwrap();
             }
