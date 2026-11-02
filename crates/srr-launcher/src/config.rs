@@ -725,4 +725,29 @@ mod tests {
         assert_eq!(landscape((480, 640)), Some((640, 480)));
         assert_eq!(landscape((639, 480)), None);
     }
+
+    /// A `launcher.cfg` saved by Notepad in a Windows code page (cp1252)
+    /// and paths with spaces, apostrophes and accents.
+    #[test]
+    fn a_cp1252_file_with_a_hostile_path_is_read() {
+        let dir = std::env::temp_dir().join(format!("srr-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(FILE_NAME);
+        std::fs::write(
+            &path,
+            b"game = C:\\Users\\Jos\xe9\\Jogos d'A\xe7\xe3o\r\nquality = high\r\n",
+        )
+        .unwrap();
+        let text = cfg::read_file(&path).unwrap().unwrap();
+        let (settings, warnings) = Settings::parse_file(&text);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            settings.game,
+            Some(PathBuf::from("C:\\Users\\José\\Jogos d'Ação"))
+        );
+        // Saving keeps the CRLF lines.
+        let saved = set_key(&text, "vsync", "on");
+        assert!(saved.contains("Jogos d'Ação\r\nquality = high\r\nvsync = on\r\n"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

@@ -397,4 +397,62 @@ mod tests {
         let plan = super::plan(&Settings::default(), &RIP, &unsupported);
         assert_eq!(plan.display, display::Plan::WarnUnsupportedMode);
     }
+
+    /// Every option, from its flag to what it changes; a new option
+    /// without a case here fails.
+    #[test]
+    fn every_option_reaches_what_it_changes() {
+        type Check = fn(&Plan, &Settings) -> bool;
+        let cases: &[(&str, &[&str], Check)] = &[
+            ("game", &["--game", r"D:\Jogos d'Ação"], |_, s| {
+                s.game.as_deref() == Some(std::path::Path::new(r"D:\Jogos d'Ação"))
+            }),
+            ("runtime", &["--runtime", r"E:\SRR"], |_, s| {
+                s.runtime.as_deref() == Some(std::path::Path::new(r"E:\SRR"))
+            }),
+            ("look", &["--look", "steam-deck"], |p, _| {
+                p.graphics.resolution == Some((1280, 800))
+            }),
+            ("resolution", &["--resolution", "2560x1080"], |p, _| {
+                p.graphics.resolution == Some((2560, 1080))
+                    && p.command[1] == "/desktop=SegaRally,2560x1080"
+                    && p.aspect == Aspect::Ultra21
+            }),
+            ("quality", &["--quality", "normal"], |p, _| {
+                p.graphics.quality == Some(Quality::Normal)
+            }),
+            ("vsync", &["--vsync", "off"], |p, _| {
+                p.graphics.vsync == Some(false)
+            }),
+            ("frame_limit", &["--frame-limit", "off"], |p, _| {
+                p.dxvk_conf.as_deref() == Some("# no frame limit (managed by SRRLauncher)\n")
+            }),
+            ("stutter_fix", &["--stutter-fix", "off"], |p, _| {
+                p.launch == MAIN_EXE
+            }),
+            ("language", &["--language", "german"], |p, _| {
+                p.registry
+                    .iter()
+                    .any(|v| v.name == "language" && v.value == "German" && !v.if_missing)
+            }),
+        ];
+        for option in crate::config::OPTIONS {
+            assert!(
+                cases.iter().any(|(key, _, _)| *key == option.key),
+                "no end-to-end case for {}",
+                option.key
+            );
+        }
+        let base = super::plan(&Settings::default(), &RIP, &linux());
+        for (key, args, check) in cases {
+            let cli = Settings::parse_args(args.iter().map(|a| a.to_string())).unwrap();
+            let settings = Settings::default().merged(cli.settings);
+            let plan = super::plan(&settings, &RIP, &linux());
+            assert!(check(&plan, &settings), "{key}: {plan:#?}");
+            assert!(
+                !check(&base, &Settings::default()),
+                "{key} holds by default"
+            );
+        }
+    }
 }
