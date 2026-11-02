@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- Updated rea-launcher-sdk to v0.3.0.
+- **One launcher at a time.** Starting the launcher again while its window
+  is open brings that window forward. While the game is running from it,
+  a second start says so and doesn't start another game (exit code 5).
+  `--check` still runs alongside.
+- The DirectX 9 download shows its unpacking progress too (the SDK's
+  downloader unpacks it now). The files now live in
+  `directx\directx_Jun2010_redist\` (unreleased builds used
+  `directx\d3dx9\`; that folder is no longer read and can be deleted).
+- The old `aspect` and `fullscreen` settings are now ignored without
+  complaint, from `launcher.cfg` and on the command line (`--aspect` used
+  to be refused). Saving from the window turns those lines into comments.
+- `--help` lists the switches in the same column as the options.
+- The Picture and Play tabs draw frame limit, language, quality and vsync
+  with the SDK's option rows. Each description now sits under its row, and
+  a screen reader hears why a disabled row is disabled.
+- The game folder field is named "Game folder" for screen readers. The
+  example path is now its description.
+- CI: the SDK's lld and import checks replace `tests/imports.rs`, the
+  x86_64 Windows target links with lld too, and a weekly workflow opens a
+  pull request when a new SDK version is out.
+- `CLAUDE.md` and `AGENTS.md` point to the SDK's standards instead of
+  repeating them. The stutter fix's clean-room rewrite is recorded as an
+  owner decision.
+
 - Golden snapshots (`crates/srr-launcher/tests/snapshots/`) of `--help`,
   the `launcher.cfg` template, and what each look and three option
   combinations write, so an SDK upgrade cannot change behaviour silently.
