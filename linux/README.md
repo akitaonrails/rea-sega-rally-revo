@@ -10,8 +10,9 @@ game needs already wired:
 - optional `winetricks d3dx9 directplay d3dcompiler_47` when `winetricks`
   is installed — the offline DirectX runtime equivalents that stop this
   game's main-menu access violation (skip with `SRR_WINETRICKS=off`)
-- the NVIDIA Vulkan ICD pinned on hybrid-GPU hosts so DXVK cannot render on
-  the integrated GPU (that failure presents as a black screen while the
+- the NVIDIA Vulkan ICD pinned (`VK_DRIVER_FILES` and the older
+  `VK_ICD_FILENAMES`) on hybrid-GPU hosts that really have an NVIDIA GPU, so
+  DXVK cannot render on the integrated GPU (that failure presents as a black screen while the
   process looks alive); Intel/AMD hybrids fall back to `DRI_PRIME=1`
 - no gamescope of its own: on hybrid-GPU hosts gamescope routes this DXVK
   title's Vulkan to the integrated GPU; the launcher's isolated Wine
@@ -31,6 +32,9 @@ the window closes without Play, `srr-play` says so and starts nothing.
 
 ## Environment
 
+A GPU choice you already made (`VK_DRIVER_FILES`, `VK_ICD_FILENAMES`,
+`DRI_PRIME`, `__NV_PRIME_RENDER_OFFLOAD`) is left alone.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SRR_PREFIX` | `~/.local/share/srr-launcher/prefix` | private Wine prefix |
@@ -38,7 +42,7 @@ the window closes without Play, `srr-play` says so and starts nothing.
 | `SRR_RUN` | empty | prefix for the wine commands, e.g. `distrobox enter gaming --` |
 | `SRR_WAIT` | unset | run in the foreground (used by the AppImage) |
 | `SRR_WINETRICKS` | `auto` | `off` skips the winetricks bootstrap |
-| `SRR_ICD_DIR` | `/usr/share/vulkan/icd.d` | Vulkan ICD directory (tests) |
+| `SRR_ICD_DIR` | `/etc/vulkan/icd.d /usr/share/vulkan/icd.d` | Vulkan ICD directories (tests) |
 | `SRR_SYSFS` | `/sys` | sysfs root (tests) |
 
 State lives in `~/.config/srr-launcher` (`running.pid`, `play.log`,

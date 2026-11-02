@@ -12,8 +12,8 @@
 #  - optional winetricks d3dx9/directplay/d3dcompiler_47 when winetricks is
 #    installed (the offline DirectX runtime equivalents that stop this
 #    game's main-menu access violation)
-#  - the NVIDIA Vulkan ICD pinned on hybrid-GPU hosts so DXVK cannot land
-#    on the integrated GPU (that presents as a black screen)
+#  - the NVIDIA Vulkan ICD pinned on hybrid-GPU hosts with an NVIDIA card,
+#    so DXVK cannot land on the integrated GPU (a black screen)
 #  - no gamescope of its own: this DXVK title on hybrid hosts routes
 #    Vulkan to the iGPU inside gamescope (the Sega Rally Revo lesson);
 #    the launcher's isolated Wine desktop handles fullscreen instead
@@ -49,30 +49,47 @@ running() {
   [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK")" 2>/dev/null
 }
 
-# Choose the Vulkan driver for DXVK on hybrid-GPU hosts. When an NVIDIA ICD
-# coexists with another vendor's ICD, pin NVIDIA: mixed enumeration order
-# after a driver update otherwise lands DXVK on the integrated GPU and the
-# game presents black frames while looking perfectly alive. Otherwise fall
-# back to the sysfs PRIME heuristic.
-gpu_env() {
-  [ -n "${VK_ICD_FILENAMES:-}${DRI_PRIME:-}${__NV_PRIME_RENDER_OFFLOAD:-}" ] && return
-  icd_dir=${SRR_ICD_DIR:-/usr/share/vulkan/icd.d}
-  nvidia= others=
-  for f in "$icd_dir"/*.json; do
-    [ -e "$f" ] || continue
-    case "$f" in *nvidia*) nvidia=$f ;; *) others="$others$f " ;; esac
+# Choose the Vulkan driver for DXVK on hybrid-GPU hosts. When an NVIDIA GPU
+# is present and its ICD coexists with another vendor's ICD, pin NVIDIA:
+# mixed enumeration order after a driver update otherwise lands DXVK on the
+# integrated GPU and the game presents black frames while looking perfectly
+# alive. An NVIDIA ICD alone (a leftover package, no NVIDIA card) is never
+# pinned. Otherwise fall back to the sysfs PRIME heuristic. A driver choice
+# the caller already made always wins.
+# SRR_ICD_DIR (space-separated dirs) and SRR_SYSFS replace the host paths
+# in tests.
+nvidia_present() {
+  [ -d "$1/module/nvidia" ] && return 0
+  for v in "$1"/bus/pci/devices/*/vendor; do
+    [ "$(cat "$v" 2>/dev/null)" = 0x10de ] && return 0
   done
-  if [ -n "$nvidia" ] && [ -n "$others" ]; then
-    echo "VK_ICD_FILENAMES=$nvidia"
+  return 1
+}
+
+gpu_env() {
+  [ -n "${VK_DRIVER_FILES:-}${VK_ICD_FILENAMES:-}${DRI_PRIME:-}${__NV_PRIME_RENDER_OFFLOAD:-}" ] && return
+  sys=${SRR_SYSFS:-/sys}
+  nvidia= others=
+  for dir in ${SRR_ICD_DIR:-/etc/vulkan/icd.d /usr/share/vulkan/icd.d}; do
+    for f in "$dir"/*.json; do
+      [ -e "$f" ] || continue
+      case "${f##*/}" in
+        *nvidia*) nvidia=${nvidia:+$nvidia:}$f ;;
+        *) others="$others$f " ;;
+      esac
+    done
+  done
+  if [ -n "$nvidia" ] && [ -n "$others" ] && nvidia_present "$sys"; then
+    # VK_ICD_FILENAMES is deprecated but still the only name older loaders read.
+    echo "VK_DRIVER_FILES=$nvidia VK_ICD_FILENAMES=$nvidia"
     return
   fi
-  sys=${SRR_SYSFS:-/sys}
   n=0 boot= boot_vram=0 other_vram=0
   for d in "$sys"/class/drm/card*; do
     case "${d##*/}" in *-*) continue ;; esac
     [ -r "$d/device/vendor" ] || continue
     n=$((n + 1))
-    vram=$(cat "$d/device/mem_info_vrm_total" 2>/dev/null || cat "$d/device/mem_info_vram_total" 2>/dev/null || echo 0)
+    vram=$(cat "$d/device/mem_info_vram_total" 2>/dev/null || echo 0)
     if [ "$(cat "$d/device/boot_vga" 2>/dev/null)" = 1 ]; then
       boot=$(cat "$d/device/vendor"); boot_vram=$vram
     elif [ "$vram" -gt "$other_vram" ]; then

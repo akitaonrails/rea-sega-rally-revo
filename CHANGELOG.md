@@ -7,6 +7,10 @@
   space), names Wine never reads. It now writes `DisableHidraw`/
   `DisableInput`, only when absent, and `SRRLauncher.exe` seeds the same
   values itself, so it also works when Proton runs the launcher directly.
+- `srr-play` no longer pins the NVIDIA Vulkan driver on hosts with a
+  leftover NVIDIA ICD but no NVIDIA GPU (that left DXVK with no device). It
+  also finds ICDs in `/etc/vulkan/icd.d`, sets `VK_DRIVER_FILES` next to the
+  deprecated `VK_ICD_FILENAMES`, and keeps a `VK_DRIVER_FILES` you set.
 
 ## v0.1.1 - 2026-11-02
 

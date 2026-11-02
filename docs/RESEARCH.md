@@ -72,7 +72,8 @@ From the `distrobox-gaming` install history (2026-05-01 through 2026-08-21):
    frames. Gamescope makes this worse (it routes Vulkan to the iGPU — the
    reason this launcher never wraps the game in gamescope). *Wired by:*
    `srr-play` pins the NVIDIA Vulkan ICD when an NVIDIA ICD coexists with
-   another vendor (verified fix, 2026-08-08); Intel/AMD hybrids fall back
+   another vendor (verified fix, 2026-08-08) and an NVIDIA GPU is present
+   (PCI vendor `0x10de` or the `nvidia` module loaded); Intel/AMD hybrids fall back
    to `DRI_PRIME=1`.
 8. **Controller bridge.** The game needs Wine's SDL-backed XInput device:
    `Map Controllers=1` with raw evdev/hidraw duplicates disabled

@@ -159,3 +159,7 @@ was exercised against the real game yet:
   options, that steering/buttons still work, and that the settings window's
   pad navigation still works, both through `srr-play` and with Steam's
   Proton running `SRRLauncher.exe` directly (second start).
+- **NVIDIA ICD pinning** now also requires an NVIDIA PCI device or the
+  `nvidia` module, and exports `VK_DRIVER_FILES`. On the reference host
+  (RTX 5090 + iGPU) `srr-play` should still print the NVIDIA pin and DXVK
+  should still pick the RTX 5090.
