@@ -122,6 +122,14 @@ matches our rip's file byte-for-byte):
 3. *Main loop refreshes the race clock every frame* (makes A impossible
    even if a pacer stalls).
 
+**Clean-room rewrite (owner decision, 2026-11-02).** The current caves
+derive from stuken's unlicensed `patch.py` (the repository has no licence),
+so they are being replaced by a clean-room implementation: a spec of what
+the three changes must do, written from the behaviour above, then an
+independent implementation from that spec alone. Until it lands the
+current table stays as it is. Docs and issues describe the fix by
+behaviour, never by its cave bytes.
+
 This launcher reimplements that patch in Rust (`patches::pacer`), with the
 same self-checks (clean hook-site bytes, zero-filled caves, size guard,
 overlap guard) and the same normalisation sites. Golden bytes from the
@@ -180,7 +188,7 @@ configuration; multisample stability under DXVK is untested.
 
 | Project | What it fixes | Licence | Maintained | Decision |
 | --- | --- | --- | --- | --- |
-| [stuken/SegaRallyRevoStutterFix](https://github.com/stuken/SegaRallyRevoStutterFix) | both stutter bugs, clean SSE1 v4.0.6.0 only (`patch.py`) | **none** (no licence file; README and `patch.py` state no terms; checked 2026-11-02) | yes (last push 2026-09-12) | reimplemented as `patches::PACER`; its cave machine code equals the fix's output. **Owner to decide** whether to ask stuken for a licence or permission (draft U1 in `docs/CONTRIBUTIONS.md`). |
+| [stuken/SegaRallyRevoStutterFix](https://github.com/stuken/SegaRallyRevoStutterFix) | both stutter bugs, clean SSE1 v4.0.6.0 only (`patch.py`) | **none** (no licence file; README and `patch.py` state no terms; checked 2026-11-02) | yes (last push 2026-09-12) | reimplemented as `patches::PACER`; its cave machine code equals the fix's output. **Owner decision 2026-11-02:** the current caves derive from stuken's unlicensed `patch.py`; they are being replaced by a clean-room implementation (a written spec of the behaviour, then an independent implementation, done separately). The U1 licence request (`docs/CONTRIBUTIONS.md`) stays a draft. |
 | [Martijnsx/Sega-Rally-Revo-Frame-Pacing-Fix](https://github.com/Martijnsx/Sega-Rally-Revo-Frame-Pacing-Fix) | timer initialisers 15,999 µs → 0 (P1), HTML/Python patcher | **none** (no licence file, checked 2026-11-02) | yes (last push 2026-10-21) | not used: another build (3,700,786 bytes). Nothing taken from it. |
 | DXVK (`d3d9.maxFrameRate`) | Linux/Wine renderer, frame limiter | Zlib | yes | bundled (pinned, mirrored) |
 | Widescreen Fixer / WSGF hex edit | ultra-wide aspect | WSGF technique (no code) | — | technique reused at our builds' offsets |

@@ -55,10 +55,12 @@ Add a row before bundling anything new.
 - The community stutter fix (stuken/SegaRallyRevoStutterFix) is
   reimplemented as the `patches::PACER` table. Its three code caves are the
   same machine code the fix's `patch.py` writes (about 130 bytes, pinned as
-  golden bytes); the fix's repository has **no licence file**, so whether
-  those bytes may be republished is an open question for the owner (a
-  request to the author is drafted in `docs/CONTRIBUTIONS.md`, U1). The
-  game executables it patches belong to the player's own copy.
+  golden bytes); the fix's repository has **no licence file**, so those
+  bytes have no grant to be republished. **Owner decision 2026-11-02:**
+  they are being replaced by a clean-room implementation (a written spec,
+  then an independent implementation); until then the table is unchanged.
+  A licence request to the author is drafted in `docs/CONTRIBUTIONS.md`
+  (U1). The game executables it patches belong to the player's own copy.
 
 The launcher never bundles official game patches, cracks, or registry
 files from the rip; the registry values it writes are its own
