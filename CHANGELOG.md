@@ -17,6 +17,8 @@
   server, and a stray game process no longer blocks a start. The launcher
   path is passed to the generated `inner.sh` as an argument, so a folder
   name with a quote can no longer break or inject into it.
+- The GitHub test-report template was copied from the DiRT launcher; it now
+  asks about Sega Rally Revo (`SRRLauncher`, `srr-play`, which executable).
 
 ## v0.1.1 - 2026-11-02
 

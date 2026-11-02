@@ -1,12 +1,14 @@
 name: Test report
-description: Tell us how DiRTLauncher runs on your PC, working or not.
-title: "Test report: "
+description: Tell us how SRRLauncher runs Sega Rally Revo on your PC, working or not.
+title: "SRR test report: "
 labels: ["test report"]
 body:
   - type: markdown
     attributes:
       value: |
-        Reports that everything works are useful too. Never attach game files.
+        Reports that everything works are useful too. Never attach SEGA Rally.exe,
+        SEGA Rally_SSE1.exe, DLLs, saves, media or any other game files. Remove
+        usernames and personal game/runtime paths from settings and logs.
   - type: dropdown
     id: system
     attributes:
@@ -18,7 +20,7 @@ body:
         - Steam Deck (Desktop Mode)
         - Linux with Steam / Proton
         - Linux with the AppImage
-        - Linux with Wine and dirt-play
+        - Linux with Wine and srr-play
         - Other
     validations:
       required: true
@@ -26,26 +28,35 @@ body:
     id: version
     attributes:
       label: Launcher version
-      description: The first line of launcher.log, e.g. "DiRTLauncher 0.1.0".
+      description: The first line of launcher.log, e.g. "SRRLauncher 0.1.1".
     validations:
       required: true
+  - type: dropdown
+    id: exe
+    attributes:
+      label: Which game executable?
+      options:
+        - Clean SEGA Rally_SSE1.exe (stutter fix available)
+        - Full-rip NoDVD SEGA Rally.exe
+        - Both
+        - Rejected as unknown (SHA-256 in the log below)
   - type: input
     id: hardware
     attributes:
-      label: CPU, graphics card and screen
-      description: e.g. "Ryzen 7 7800X3D, RTX 3060, 2560x1440 at 144 Hz".
+      label: CPU, graphics card, controller and screen
+      description: e.g. "Ryzen 7 7800X3D, RTX 3060, Xbox-style pad, 2560x1440 at 144 Hz".
   - type: checkboxes
     id: worked
     attributes:
       label: What worked?
       options:
         - label: The settings window opened
-        - label: The intro and menus showed
-        - label: A race loaded without the modern-CPU crash
+        - label: The title screen and menus showed (no main-menu crash)
         - label: A full race could be driven
         - label: Gamepad (steering, pedals, buttons)
-        - label: Rumble
-        - label: 4K / widescreen picture
+        - label: Smooth frame pacing (stutter fix / frame limit)
+        - label: Widescreen / ultra-wide picture
+        - label: Saves and settings survived another launch
         - label: The game closed cleanly
   - type: textarea
     id: settings
@@ -62,6 +73,7 @@ body:
     attributes:
       label: launcher.log
       description: |
-        Windows: %LOCALAPPDATA%\DiRTLauncher\launcher.log. Under Wine/Proton it is inside the prefix.
+        Windows: %LOCALAPPDATA%\SRRLauncher\launcher.log. Under Wine/Proton it is inside the prefix
+        (srr-play / AppImage prefix: ~/.local/share/srr-launcher/prefix).
         Remove personal paths before posting.
       render: text
