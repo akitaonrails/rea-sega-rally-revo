@@ -47,8 +47,9 @@ From the `distrobox-gaming` install history (2026-05-01 through 2026-08-21):
    after reaching the menu): the game expects
    `Documents\SEGA Rally\Saved Games\SEGA Rally.dat` and
    `Public Documents\SEGA Rally\Shared Data\Rank Table\SR_RANKTABLES.DAT`
-   (plus `Ghosts/`) to exist. *Wired by:* seeded when missing, never
-   overwritten afterwards.
+   (plus `Ghosts/`) to exist. *Wired by:* the folders are created when
+   missing. Empty seed files were dropped on 2026-11-02 (the game called
+   them corrupt); the game creates both files itself (see RUNTIME_NOTES).
 4. **Offline DirectX runtime needed.** The repeatable main-menu access
    violation was stopped by installing the June 2010 DirectX redist plus
    `d3dx9`, `directplay` into the prefix (the rip ships only

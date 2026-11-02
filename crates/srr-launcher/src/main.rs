@@ -494,14 +494,7 @@ mod app {
             )),
         }
 
-        for dir in [
-            &documents.saved_games,
-            &documents.rank_table,
-            &documents.ghosts,
-        ] {
-            fs::create_dir_all(dir)
-                .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
-        }
+        gamecfg::prepare_documents(&documents)?;
         // Earlier releases built config.ini at `config.ini.srr-tmp`.
         if let Err(error) =
             fsx::remove_stale_temps_here(&documents.saved_games, &[gamecfg::OLD_TEMP_SUFFIX])
@@ -530,14 +523,6 @@ mod app {
                 "warning: cannot read {} ({error}); left unchanged",
                 config_path.display()
             )),
-        }
-        for file in [
-            (documents.saved_games.join("SEGA Rally.dat"), "save file"),
-            (documents.rank_table.join("SR_RANKTABLES.DAT"), "rank table"),
-        ] {
-            if !file.0.exists() && fs::write(&file.0, b"").is_err() {
-                return Err(format!("cannot seed the {}", file.1));
-            }
         }
 
         match seed_game_registry(&plan.registry) {

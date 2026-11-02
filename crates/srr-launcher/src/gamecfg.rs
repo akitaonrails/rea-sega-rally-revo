@@ -279,9 +279,14 @@ pub fn registry_values(runtime_windows_path: &str, language: Option<&str>) -> Ve
     ]
 }
 
-/// The Documents layout the game expects, seeded when missing. Without
-/// these the game can reach the main menu and then die with an access
-/// violation.
+/// The game's save file, in [`DocumentsPaths::saved_games`].
+pub const SAVE_FILE: &str = "SEGA Rally.dat";
+/// The game's local leaderboard, in [`DocumentsPaths::rank_table`].
+pub const RANK_TABLE_FILE: &str = "SR_RANKTABLES.DAT";
+
+/// The Documents layout the game expects. The folders are created when
+/// missing; the save files inside are the game's own (owner decision
+/// 2026-11-02: empty seeds made the game call them corrupt).
 pub struct DocumentsPaths {
     pub saved_games: std::path::PathBuf,
     pub rank_table: std::path::PathBuf,
@@ -302,6 +307,20 @@ pub fn documents_paths(profile: &std::path::Path, public: &std::path::Path) -> D
         ghosts: shared.join("Ghosts"),
         saved_games,
     }
+}
+
+/// Create the Documents folders the game writes into. Never writes a save
+/// file.
+pub fn prepare_documents(documents: &DocumentsPaths) -> Result<(), String> {
+    for dir in [
+        &documents.saved_games,
+        &documents.rank_table,
+        &documents.ghosts,
+    ] {
+        std::fs::create_dir_all(dir)
+            .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -551,6 +570,34 @@ mod tests {
             dxvk_conf(None),
             "# no frame limit (managed by SRRLauncher)\n"
         );
+    }
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "srr-launcher-gamecfg-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        path
+    }
+
+    #[test]
+    fn documents_get_their_folders_and_no_save_files() {
+        // Owner decision 2026-11-02: the game makes its own save files;
+        // empty seeds made it report them as corrupt.
+        let root = temp("folders");
+        let documents = documents_paths(&root.join("me"), &root.join("Public"));
+        prepare_documents(&documents).unwrap();
+        for dir in [
+            &documents.saved_games,
+            &documents.rank_table,
+            &documents.ghosts,
+        ] {
+            assert!(dir.is_dir(), "{}", dir.display());
+        }
+        assert!(!documents.saved_games.join(SAVE_FILE).exists());
+        assert!(!documents.rank_table.join(RANK_TABLE_FILE).exists());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

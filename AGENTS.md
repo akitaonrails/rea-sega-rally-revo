@@ -62,6 +62,11 @@ as `distrobox enter gaming -- sh -c 'cd /absolute/path && …'`.
   change the pacer patch code or its tests, and don't copy or quote its
   cave bytes into docs, issues or other code.
 
+- **2026-11-02 — the game makes its own save files.** The launcher no
+  longer seeds empty `SEGA Rally.dat` / `SR_RANKTABLES.DAT` (the game
+  called them corrupt: "Player Progress Data Corrupt", "Local Leaderboard
+  Corrupt"); it only creates the Documents folders.
+
 ## Game-specific rules
 
 - Support the v4.0.6.0 PC build by exact hash (clean `SEGA Rally_SSE1.exe`,
@@ -74,8 +79,8 @@ as `distrobox enter gaming -- sh -c 'cd /absolute/path && …'`.
   Everything else is configuration the game reads.
 - `config.ini` is seeded complete only when missing; afterwards only the
   keys of options set in `launcher.cfg` are written (`ini::Owned`). Never
-  rewrite `[Audio]`/`[GameController]`; never delete `SEGA Rally.dat` or
-  `SR_RANKTABLES.DAT`.
+  rewrite `[Audio]`/`[GameController]`. The save files (`SEGA Rally.dat`,
+  `SR_RANKTABLES.DAT`) are the game's: never seeded, never deleted.
 - Keep options specific to Sega Rally Revo and verified in the game.
   Anti-aliasing and the 62.5 fps Championship cap are deliberately absent;
   unverified values are listed in `docs/RUNTIME_NOTES.md`.
