@@ -423,7 +423,7 @@ mod app {
                 gamecfg::seed_config(picture.resolution.unwrap(), picture.quality, picture.vsync)
             }
         };
-        fs::write(&config_path, config_text)
+        gamecfg::write_atomic(&config_path, &config_text)
             .map_err(|error| format!("cannot write {}: {error}", config_path.display()))?;
         for file in [
             (paths.saved_games.join("SEGA Rally.dat"), "save file"),

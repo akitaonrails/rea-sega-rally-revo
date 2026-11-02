@@ -5,7 +5,8 @@
 //! `config.ini` lives in `Documents\SEGA Rally\Saved Games\config.ini`.
 //! Only the `[Graphics]` keys this launcher manages are touched; existing
 //! `[Audio]` and `[GameController]` sections (which hold the player's
-//! controller GUID and mapping) are preserved verbatim.
+//! controller GUID and mapping) are preserved verbatim. The real file is
+//! replaced atomically ([`write_atomic`]).
 
 use crate::config::Quality;
 
@@ -80,90 +81,35 @@ pub fn seed_sections() -> String {
     .to_string()
 }
 
-/// Merge our managed `[Graphics]` keys into an existing config.ini text,
-/// preserving every other section, key, and comment. Keys are updated in
-/// place; missing keys are appended to the section; a missing section is
-/// appended to the file.
+/// Merge our managed `[Graphics]` keys into an existing config.ini text.
+/// Only `[Graphics]` is edited (see [`crate::ini`]): keys are updated in
+/// place whatever their case or spacing, missing keys are added to the
+/// section, a missing section is appended. `[Audio]`, `[GameController]`
+/// and every comment or unknown key stay exactly as they were.
 pub fn update_config(
     existing: &str,
     resolution: (u32, u32),
     quality: Quality,
     vsync: bool,
 ) -> String {
-    let managed = graphics_section(resolution, quality, vsync);
-    let desired: Vec<(&str, &str)> = managed
+    graphics_section(resolution, quality, vsync)
         .lines()
         .map(|line| line.split_once('=').expect("key=value"))
-        .collect();
+        .fold(existing.to_string(), |text, (key, value)| {
+            crate::ini::set_section_key(&text, "Graphics", key, value)
+        })
+}
 
-    let mut out: Vec<String> = Vec::new();
-    let mut in_graphics = false;
-    let mut section_seen = false;
-    let mut section_end = 0usize;
-    let mut written: Vec<String> = Vec::new();
-    for line in existing.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            if in_graphics {
-                // insert any not-yet-written managed keys before the next section
-                for (key, value) in &desired {
-                    if !written.iter().any(|w| w.eq_ignore_ascii_case(key)) {
-                        out.push(format!("{key}={value}"));
-                        written.push((*key).to_string());
-                    }
-                }
-                in_graphics = false;
-            }
-            if trimmed.eq_ignore_ascii_case("[graphics]") {
-                in_graphics = true;
-                section_seen = true;
-            }
-            out.push(line.to_string());
-            if in_graphics {
-                section_end = out.len();
-            }
-            continue;
-        }
-        if in_graphics
-            && let Some((key, _)) = trimmed.split_once('=')
-            && desired
-                .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case(key))
-        {
-            let (_, value) = desired
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case(key))
-                .expect("checked above");
-            out.push(format!("{key}={value}"));
-            written.push(key.to_string());
-            section_end = out.len();
-            continue;
-        }
-        out.push(line.to_string());
-        if in_graphics && !trimmed.is_empty() {
-            section_end = out.len();
-        }
-    }
-    if in_graphics {
-        for (key, value) in &desired {
-            if !written.iter().any(|w| w.eq_ignore_ascii_case(key)) {
-                out.insert(section_end, format!("{key}={value}"));
-                section_end += 1;
-                written.push((*key).to_string());
-            }
-        }
-    } else if !section_seen {
-        if !existing.trim().is_empty() {
-            out.push(String::new());
-        }
-        out.push("[Graphics]".to_string());
-        for (key, value) in &desired {
-            out.push(format!("{key}={value}"));
-        }
-    }
-    let mut text = out.join("\n");
-    text.push('\n');
-    text
+/// Replace `path` with `text` atomically: a crash or a full disk mid-write
+/// leaves the player's previous file, never a truncated one.
+pub fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(".srr-tmp");
+    let temp = std::path::PathBuf::from(temp);
+    std::fs::write(&temp, text)?;
+    std::fs::rename(&temp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temp);
+    })
 }
 
 /// Full config.ini for a first run (no file exists yet).
@@ -332,6 +278,41 @@ mod tests {
         );
         assert!(WINEBUS_VALUES.iter().all(|(_, value)| *value == 1));
         assert_eq!(WINEBUS_KEY, r"System\CurrentControlSet\Services\winebus");
+    }
+
+    #[test]
+    fn update_recognises_spaced_and_differently_cased_keys() {
+        let existing = "[Audio]\r\nQuality = 2\r\n\r\n[GameController]\r\nGUID = {1234}\r\n\r\n[Graphics]\r\nHorizontalResolution = 1280\r\nverticalresolution=720\r\n";
+        let out = update_config(existing, (3840, 2160), Quality::High, true);
+        assert_eq!(out.matches("HorizontalResolution").count(), 1);
+        assert_eq!(
+            out.to_ascii_lowercase()
+                .matches("verticalresolution")
+                .count(),
+            1
+        );
+        assert!(out.contains("HorizontalResolution=3840\r\n"));
+        assert!(out.contains("VerticalResolution=2160\r\n"));
+        // the player's sections, spacing included, are untouched
+        assert!(
+            out.starts_with("[Audio]\r\nQuality = 2\r\n\r\n[GameController]\r\nGUID = {1234}\r\n")
+        );
+        assert!(!out.replace("\r\n", "").contains('\n'), "line endings kept");
+        // and running it again changes nothing
+        assert_eq!(update_config(&out, (3840, 2160), Quality::High, true), out);
+    }
+
+    #[test]
+    fn write_atomic_replaces_the_file_and_leaves_no_temp() {
+        let dir = std::env::temp_dir().join(format!("srr-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.ini");
+        std::fs::write(&path, "old").unwrap();
+        write_atomic(&path, "new").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

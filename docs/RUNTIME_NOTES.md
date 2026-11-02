@@ -170,3 +170,8 @@ was exercised against the real game yet:
 - **Look cards on a Steam Deck.** The first-run look and badge on a real
   Deck (1280×800, Game Mode) are unit-tested only; check that the window
   shows Steam Deck selected and badged there.
+- **config.ini editing** now rewrites a managed `[Graphics]` key as
+  `Key=value` wherever it was spelled differently, drops duplicate managed
+  keys, and replaces the file by rename. Check that the game still reads
+  the resolution/quality after a launch over a config.ini the game itself
+  saved (CRLF), and that controller bindings survive.
