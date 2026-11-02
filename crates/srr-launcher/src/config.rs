@@ -232,7 +232,7 @@ fn parse_resolution(value: &str) -> Option<(u32, u32)> {
     ((640..=7680).contains(&width) && (480..=4320).contains(&height)).then_some((width, height))
 }
 
-fn entry(line: &str) -> Option<(&str, &str)> {
+pub(crate) fn entry(line: &str) -> Option<(&str, &str)> {
     let line = line.trim();
     if line.starts_with('#') {
         return None;

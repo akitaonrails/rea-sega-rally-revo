@@ -63,6 +63,35 @@ pub enum Look {
     Custom,
 }
 
+impl Look {
+    /// The `look` key the window saves in launcher.cfg (window memory
+    /// only; the game and the command line never read it).
+    pub fn key(self) -> &'static str {
+        match self {
+            Look::Modern => "modern",
+            Look::SteamDeck => "steam-deck",
+            Look::Original => "original",
+            Look::Custom => "custom",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Look> {
+        [Look::Modern, Look::SteamDeck, Look::Original, Look::Custom]
+            .into_iter()
+            .find(|look| look.key().eq_ignore_ascii_case(value.trim()))
+    }
+
+    /// The preset's picture, `None` for Custom.
+    fn picture(self) -> Option<Picture> {
+        match self {
+            Look::Modern => Some(Picture::MODERN),
+            Look::SteamDeck => Some(Picture::STEAM_DECK),
+            Look::Original => Some(Picture::ORIGINAL),
+            Look::Custom => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Form {
     pub game: String,
@@ -110,13 +139,31 @@ impl Form {
     /// is no file yet (or it is blank), otherwise what the file says. A file
     /// that happens to match the template word for word is the player's,
     /// not a first run.
+    ///
+    /// The look the window saved wins while the values still make it
+    /// (Custom always does): on a Deck, Modern and Steam Deck have the same
+    /// values and only the saved name tells them apart. Without one, or
+    /// after a hand edit, the look is worked out from the values.
     pub fn from_file(saved: Option<&str>, screen: Option<(u32, u32)>) -> Form {
-        match saved {
-            Some(text) if !text.trim().is_empty() => {
-                Form::new(&Settings::parse_file(text).0, screen)
+        let Some(text) = saved.filter(|text| !text.trim().is_empty()) else {
+            return Form::first_run(screen);
+        };
+        let mut form = Form::new(&Settings::parse_file(text).0, screen);
+        let remembered = text
+            .lines()
+            .filter_map(config::entry)
+            .filter(|(key, _)| *key == "look")
+            .filter_map(|(_, value)| Look::parse(value))
+            .next_back();
+        if let Some(look) = remembered {
+            let fits = look
+                .picture()
+                .is_none_or(|preset| preset.resolved(screen) == form.picture.resolved(screen));
+            if fits {
+                form.look = look;
             }
-            _ => Form::first_run(screen),
         }
+        form
     }
 
     /// The look these picture values make on a screen. The Steam Deck
@@ -165,7 +212,8 @@ impl Form {
         out = config::set_key(&out, "vsync", &picture.vsync.to_string());
         out = config::set_key(&out, "frame-limit", self.frame_limit.key());
         out = config::set_key(&out, "stutter-fix", &self.stutter_fix.to_string());
-        config::set_key(&out, "language", &self.language)
+        out = config::set_key(&out, "language", &self.language);
+        config::set_key(&out, "look", self.look.key())
     }
 }
 
@@ -353,6 +401,28 @@ mod tests {
             Form::from_file(Some(&with_game), deck).game,
             r"D:\Sega Rally"
         );
+    }
+
+    #[test]
+    fn a_saved_look_reopens_as_itself_while_its_values_fit() {
+        let deck = Some(STEAM_DECK_SCREEN);
+        for look in [Look::Modern, Look::SteamDeck, Look::Original, Look::Custom] {
+            let mut form = Form::first_run(deck);
+            form.set_look(look);
+            let text = form.save(config::TEMPLATE, deck);
+            assert!(text.contains(&format!("look = {}", look.key())));
+            assert_eq!(Form::from_file(Some(&text), deck).look, look, "{look:?}");
+            assert_eq!(Look::parse(look.key()), Some(look));
+        }
+        // A hand edit that breaks the preset falls back to the values.
+        let mut form = Form::first_run(deck);
+        form.set_look(Look::Modern);
+        let edited = config::set_key(&form.save(config::TEMPLATE, deck), "quality", "ultra");
+        assert_eq!(Form::from_file(Some(&edited), deck).look, Look::Custom);
+        // An unknown look name is ignored, and is not a settings warning.
+        let odd = config::set_key(&form.save(config::TEMPLATE, deck), "look", "fancy");
+        assert_eq!(Form::from_file(Some(&odd), deck).look, Look::SteamDeck);
+        assert!(Settings::parse_file(&odd).1.is_empty());
     }
 
     #[test]

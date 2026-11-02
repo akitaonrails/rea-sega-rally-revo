@@ -42,6 +42,9 @@ WINEPREFIX=~/.local/share/srr-launcher/prefix wine reg add \
   look is recommended, picked on first run and shown as selected (it
   showed as Modern, whose values are the same at 1280×800). The
   "Recommended" badge follows the screen instead of always marking Modern.
+  The window also saves the chosen look (`look = …` in `launcher.cfg`, read
+  only by the window), so on a Deck a saved Modern reopens as Modern; a
+  hand edit that no longer matches the preset shows as Custom.
 - `config.ini`: a `[Graphics]` key written with spaces or another case
   (`HorizontalResolution = 1280`) is now updated in place instead of being
   left alone with a second copy appended; duplicates an earlier version
