@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Built on the shared rea-launcher-sdk v0.1.0.** The launcher's
+  generic code (runtime copy, config editing, Win32 helpers, the settings
+  window's widgets, the Linux helper's session handling, AppImage
+  packaging and CI) now comes from the SDK the five rea launchers share;
+  what you see and set stays the same. Small differences:
+  - `launcher.log` starts afresh once it passes 1 MiB.
+  - Settings window: a row of choices is one stop for the d-pad
+    (left/right changes the value), focused controls show a ring, and
+    the Browse/Test rumble labels are white on the orange outline.
+  - `launcher.cfg`: a `#key =` line in the file becomes the setting
+    instead of a new line at the end; a file saved by Notepad in ANSI is
+    read instead of being treated as missing.
+  - Native Windows without admin rights: the game's registry values go to
+    the 32-bit VirtualStore location (`WOW6432Node`), and only when HKLM
+    is refused; the screen size is the monitor's real resolution.
+  - `srr-play`: the `GPU:` line shows only when something starts; the old
+    test-only `SRR_ICD_DIR`/`SRR_SYSFS` variables are gone.
+  - The AppImage also carries the README, licences and changelog.
 - **Controller behaviour change on Linux.** The controller bridge now
   really disables Wine's raw hidraw/evdev devices. `srr-play` used to
   write `Disable Hidraw`/`Disable Input` (with a space), names Wine never

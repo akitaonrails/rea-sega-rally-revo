@@ -211,3 +211,20 @@ WINEPREFIX=~/.local/share/srr-launcher/prefix wine reg add \
 - **Disabled chips** now outline the saved value and show a hover reason;
   not yet seen in the real window (capture the Play tab on native Windows
   or with a folder that lacks the clean SSE1 exe).
+
+## 2026-11-02 — move onto rea-launcher-sdk v0.1.0
+
+Verified: `cargo test --workspace` (host, including the palette contrast
+test), the Windows tests under Wine with the SDK's headless
+`scripts/wine-test` in the `gaming` distrobox (baseline before the move:
+all 66 pass; after: all 56 pass — the rest moved to the SDK's own
+suites), the linked `SRRLauncher.exe` (lld) and its import-resolution
+test, every `linux/tests/*.sh`, `cargo deny check`, the sdk/ drift check,
+and a full local `packaging/package.sh` run: the zip passes
+`packaging/package.allow`, the AppImage holds `usr/lib/srr/{SRRLauncher.exe,
+srr-play,rea-play.sh,linux/d3d9.dll}` and its `srr-play status` answers.
+
+Not exercised: the settings window (no window was opened), a game
+session, `real_game` (no game folder on this host), and native Windows.
+Worth a look on the next real run: the new chip focus ring and d-pad
+stepping in the window, and the VirtualStore path on a non-admin Windows.

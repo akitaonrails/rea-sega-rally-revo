@@ -6,6 +6,7 @@ Add a row before bundling anything new.
 
 | Component | Licence | Source |
 | --- | --- | --- |
+| rea-launcher, rea-launcher-win32, rea-launcher-ui (the shared launcher SDK) | MIT OR Apache-2.0 | github.com/akitaonrails/rea-launcher-sdk (tag pinned in `Cargo.toml`) |
 | sha2 | MIT OR Apache-2.0 | crates.io |
 | eframe / egui (and dependencies) | MIT OR Apache-2.0 | crates.io |
 | jpeg-decoder | MIT OR Apache-2.0 | crates.io |
@@ -13,6 +14,10 @@ Add a row before bundling anything new.
 | MinGW-w64 runtime | BSD-3-Clause and others | mingw-w64.org |
 
 ## Bundled for Linux
+
+`rea-play.sh`, the SDK's play library (MIT OR Apache-2.0), ships beside
+`srr-play`.
+
 
 | Component | Licence | Source |
 | --- | --- | --- |
@@ -26,7 +31,7 @@ Add a row before bundling anything new.
 | --- | --- | --- |
 | Window portrait | ours (AI-generated for this launcher; nothing taken from the game) | — |
 | App icon | ours (AI-generated for this launcher) | — |
-| Barlow, Barlow Condensed (window fonts) | SIL OFL 1.1 | google.com/fonts (licence file beside the fonts) |
+| Barlow, Barlow Condensed (window fonts, bundled by `rea-launcher-ui`) | SIL OFL 1.1 | google.com/fonts (licence file beside the fonts in the SDK's `crates/rea-launcher-ui/assets/fonts`) |
 
 ## Not bundled, but wired
 
