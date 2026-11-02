@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rea_launcher::download::{self, Job};
 use rea_launcher::fsx;
 use rea_launcher_ui::download::{Download, DownloadAction, DownloadState, download_row};
 use rea_launcher_ui::egui::{self, Align2, Key, Rect, Response, TextureHandle, pos2, vec2};
@@ -15,7 +16,7 @@ use rea_launcher_ui::theme::{body, decal, semibold};
 use rea_launcher_ui::widgets::{self, Chip, Crop, LookCard};
 use rea_launcher_ui::window::Layout;
 use srr_launcher::config::{self, Aspect, FrameLimit, LANGUAGES, Quality};
-use srr_launcher::directx::{self, After, Progress};
+use srr_launcher::directx;
 use srr_launcher::edition::{self, GameEditions};
 use srr_launcher::form::{self, Form, Look, Picture};
 
@@ -45,7 +46,7 @@ pub struct Host {
     /// Where the DirectX 9 files are kept.
     pub directx_root: PathBuf,
     /// Starts the DirectX download on a worker thread.
-    pub start_download: Box<dyn Fn(Arc<Progress>)>,
+    pub start_download: Box<dyn Fn(Arc<Job>)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -116,7 +117,7 @@ pub struct Window {
     rumble_test: Option<String>,
     pad: PadNav,
     pending: Vec<Nav>,
-    download: Option<Arc<Progress>>,
+    download: Option<Arc<Job>>,
     pub outcome: Arc<Mutex<Outcome>>,
 }
 
@@ -426,23 +427,10 @@ impl Window {
         );
         let pin = directx::pin();
         let root = self.host.directx_root.clone();
-        let installed = directx::installed(&pin, &root).is_some();
-        let phase = self.download.as_ref().map(|progress| progress.job.phase());
-        let after = self.download.as_ref().map(|progress| progress.after());
-        let state = match (&after, &phase) {
-            (Some(After::Unpacking), _) => DownloadState::Unpacking { done: 0, total: 1 },
-            (Some(After::Failed(message)), _) => DownloadState::Failed(message),
-            (Some(After::Done(_)), _) => DownloadState::Installed,
-            // The download finished; unpacking starts in a moment.
-            (_, Some(rea_launcher::download::Phase::Done(_))) => {
-                DownloadState::Unpacking { done: 0, total: 1 }
-            }
-            _ => DownloadState::from_phase(
-                phase.as_ref(),
-                installed,
-                rea_launcher::download::partial(&pin, &root),
-            ),
-        };
+        let installed = download::installed(&pin, &root).is_some();
+        let phase = self.download.as_ref().map(|job| job.phase());
+        let state =
+            DownloadState::from_phase(phase.as_ref(), installed, download::partial(&pin, &root));
         let row = Download {
             label: directx::LABEL,
             size: pin.size,
@@ -450,17 +438,17 @@ impl Window {
         };
         match download_row(ui, &row) {
             Some(DownloadAction::Start) => {
-                let progress = Arc::new(Progress::default());
-                self.download = Some(progress.clone());
-                (self.host.start_download)(progress);
+                let job = Arc::new(Job::default());
+                self.download = Some(job.clone());
+                (self.host.start_download)(job);
             }
             Some(DownloadAction::Cancel) => {
-                if let Some(progress) = &self.download {
-                    progress.job.cancel();
+                if let Some(job) = &self.download {
+                    job.cancel();
                 }
             }
             Some(DownloadAction::Remove) => {
-                if let Err(error) = directx::remove(&pin, &root) {
+                if let Err(error) = download::remove(&pin, &root) {
                     self.error = Some(format!("Can't remove the DirectX 9 files: {error}"));
                 }
                 self.download = None;
@@ -653,7 +641,7 @@ mod native {
             directx_root: directx_root.to_path_buf(),
             start_download: {
                 let root = directx_root.to_path_buf();
-                Box::new(move |progress| {
+                Box::new(move |job| {
                     let root = root.clone();
                     std::thread::spawn(move || {
                         let fetch =
@@ -663,7 +651,7 @@ mod native {
                             &root,
                             &disk::free_space,
                             &fetch,
-                            &progress,
+                            &job,
                         );
                     });
                 })

@@ -34,7 +34,7 @@ mod app {
     use rea_launcher::identify;
     use rea_launcher::ini::Owned;
     use rea_launcher::log::Log;
-    use rea_launcher::{cfg, fsx, paths};
+    use rea_launcher::{cfg, download, fsx, paths};
     use rea_launcher_win32::dialog::{self, Icon};
     use rea_launcher_win32::reg::Key;
     use rea_launcher_win32::{console, disk, display as screen, gpu, http, wine, xinput};
@@ -180,22 +180,21 @@ mod app {
     fn download_directx() -> Result<u32, String> {
         let pin = directx::pin();
         let root = directx_root();
-        if directx::installed(&pin, &root).is_some() {
+        if download::installed(&pin, &root).is_some() {
             let note = "DirectX 9 files: already downloaded";
             log_line(note);
             report("Sega Rally Revo launcher", note, false);
             return Ok(0);
         }
-        let progress = std::sync::Arc::new(directx::Progress::default());
-        let worker = progress.clone();
+        let job = std::sync::Arc::new(download::Job::default());
+        let worker = job.clone();
         let handle = std::thread::spawn(move || {
             let fetch = http::WinHttp::new(concat!("SRRLauncher/", env!("CARGO_PKG_VERSION")));
             directx::install(&pin, &root, &disk::free_space, &fetch, &worker)
         });
         let mut logged = None;
         while !handle.is_finished() {
-            if let rea_launcher::download::Phase::Downloading { done, total } = progress.job.phase()
-            {
+            if let download::Phase::Downloading { done, total } = job.phase() {
                 let tenth = done * 10 / total.max(1);
                 if logged != Some(tenth) {
                     log_line(&format!("directx: downloading {}%", tenth * 10));
@@ -366,7 +365,7 @@ mod app {
         }
 
         // The DirectX 9 files the player downloaded, if any.
-        let directx_dir = directx::installed(&directx::pin(), &directx_root());
+        let directx_dir = download::installed(&directx::pin(), &directx_root());
         let placed = directx::place(&game, &runtime_dir, directx_dir.as_deref())
             .map_err(|error| format!("cannot place the DirectX 9 files: {error}"))?;
         if !placed.installed.is_empty() {

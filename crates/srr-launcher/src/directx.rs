@@ -21,11 +21,8 @@
 use std::fs;
 use std::io::{self, Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use rea_launcher::download::{self, Fetch, FreeSpace, Job, Phase, Pin};
-use rea_launcher::fsx;
-use rea_launcher::identify::hex;
 use rea_launcher::ledger::{Ledger, Outcome};
 
 /// Microsoft's June 2010 DirectX End-User Runtime (re-signed by Microsoft
@@ -37,9 +34,6 @@ pub const PIN: &str = "https://download.microsoft.com/download/8/4/A/84A35BF1-DA
 pub fn pin() -> Pin {
     Pin::parse(PIN).expect("a valid pin")
 }
-
-/// The folder below the component root that holds the DLLs.
-pub const DLL_DIR: &str = "d3dx9";
 
 /// The ledger of what the launcher put into the private copy.
 pub const LEDGER: &str = ".srr-components";
@@ -108,103 +102,43 @@ pub fn extract(package: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
     Ok(dlls)
 }
 
-/// The unpacked DLL folder, when a complete one for `pin` is there.
-pub fn installed(pin: &Pin, root: &Path) -> Option<PathBuf> {
-    let dir = root.join(DLL_DIR);
-    let mark = fs::read_to_string(dir.join(download::MARKER)).ok()?;
-    (mark.trim() == hex(&pin.sha256)).then_some(dir)
-}
-
-/// Unpacks `package` into `root/d3dx9` through a temporary folder renamed
-/// into place, marked complete with the package's hash.
-pub fn unpack(pin: &Pin, package: &[u8], root: &Path) -> Result<PathBuf, String> {
-    let dlls = extract(package)?;
-    let dir = root.join(DLL_DIR);
-    let temp = root.join(format!("{DLL_DIR}.rea-new"));
-    let fail = |error: io::Error| error.to_string();
-    if temp.exists() {
-        fs::remove_dir_all(&temp).map_err(fail)?;
-    }
-    fs::create_dir_all(&temp).map_err(fail)?;
+/// The extractor `download::install_with` runs on the package: the wanted
+/// DLLs go into `into`, reported as unpacked bytes through `job`.
+pub fn extract_into(archive: &Path, into: &Path, job: &Job) -> Result<(), String> {
+    let package = fs::read(archive).map_err(|error| format!("{}: {error}", archive.display()))?;
+    let dlls = extract(&package)?;
+    let total = dlls.iter().map(|(_, bytes)| bytes.len() as u64).sum();
+    let mut done = 0;
+    job.set_phase(Phase::Unpacking { done, total });
     for (name, bytes) in &dlls {
-        fs::write(temp.join(name), bytes).map_err(fail)?;
+        if job.cancelled() {
+            return Err("cancelled".into());
+        }
+        let path = into.join(name);
+        fs::write(&path, bytes).map_err(|error| format!("{}: {error}", path.display()))?;
+        done += bytes.len() as u64;
+        job.set_phase(Phase::Unpacking { done, total });
     }
-    fs::write(temp.join(download::MARKER), hex(&pin.sha256)).map_err(fail)?;
-    if dir.exists() {
-        fs::remove_dir_all(&dir).map_err(fail)?;
-    }
-    fs::rename(&temp, &dir).map_err(fail)?;
-    Ok(dir)
+    Ok(())
 }
 
-/// Where an install is after the download itself.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum After {
-    /// Not there yet (or no install running).
-    #[default]
-    Waiting,
-    Unpacking,
-    Done(PathBuf),
-    Failed(String),
-}
-
-/// One install shared by the worker thread and the window.
-#[derive(Debug, Default)]
-pub struct Progress {
-    pub job: Job,
-    after: Mutex<After>,
-}
-
-impl Progress {
-    pub fn after(&self) -> After {
-        self.after.lock().unwrap_or_else(|e| e.into_inner()).clone()
-    }
-
-    fn set(&self, after: After) {
-        *self.after.lock().unwrap_or_else(|e| e.into_inner()) = after;
-    }
-}
-
-/// Downloads the package (resumable, verified), unpacks the DLLs and
-/// deletes the package. Runs on a worker thread; the window polls
-/// `progress`.
+/// Downloads the package (resumable, verified) and unpacks the DLLs into
+/// `download::installed(pin, root)` (SDK `install_with`, which deletes the
+/// package afterwards). Runs on a worker thread; the window polls `job`.
 pub fn install(
     pin: &Pin,
     root: &Path,
     free: FreeSpace,
     fetch: &dyn Fetch,
-    progress: &Progress,
+    job: &Job,
 ) -> Result<PathBuf, String> {
     fs::create_dir_all(root).map_err(|error| format!("{}: {error}", root.display()))?;
-    let result = match download::download(pin, root, free, fetch, &progress.job) {
-        Phase::Done(file) => {
-            progress.set(After::Unpacking);
-            let unpacked = fs::read(&file)
-                .map_err(|error| format!("{}: {error}", file.display()))
-                .and_then(|package| unpack(pin, &package, root));
-            if unpacked.is_ok() {
-                let _ = fsx::remove(&file);
-            }
-            unpacked
-        }
+    match download::install_with(pin, root, free, fetch, job, &extract_into) {
+        Phase::Done(dir) => Ok(dir),
         Phase::Failed(error) => Err(error),
         Phase::Cancelled => Err("cancelled".to_string()),
         other => Err(format!("the download stopped ({other:?})")),
-    };
-    progress.set(match &result {
-        Ok(dir) => After::Done(dir.clone()),
-        Err(error) => After::Failed(error.clone()),
-    });
-    result
-}
-
-/// Deletes the unpacked DLLs and anything left of a download.
-pub fn remove(pin: &Pin, root: &Path) -> io::Result<()> {
-    let dir = root.join(DLL_DIR);
-    if dir.exists() {
-        fs::remove_dir_all(&dir)?;
     }
-    download::remove(pin, root)
 }
 
 /// The DLL names in an unpacked folder, sorted.
@@ -336,20 +270,9 @@ mod tests {
     }
 
     #[test]
-    fn unpack_marks_the_folder_and_replaces_an_older_one() {
-        let root = temp("unpack");
-        let pin = pin();
-        assert_eq!(installed(&pin, &root), None);
-        fs::create_dir_all(root.join(DLL_DIR)).unwrap();
-        fs::write(root.join(DLL_DIR).join("old.dll"), b"old").unwrap();
-        let dir = unpack(&pin, &package(), &root).unwrap();
-        assert_eq!(installed(&pin, &root), Some(dir.clone()));
-        assert_eq!(dlls(&dir), ["D3DCompiler_43.dll", "d3dx9_35.dll"]);
-        assert!(!dir.join("old.dll").exists());
-        assert_eq!(override_names(&dlls(&dir)), ["d3dcompiler_43", "d3dx9_35"]);
-        remove(&pin, &root).unwrap();
-        assert_eq!(installed(&pin, &root), None);
-        fs::remove_dir_all(root).unwrap();
+    fn the_folder_is_named_after_the_package() {
+        let root = Path::new("root");
+        assert_eq!(pin().dir(root), root.join("directx_Jun2010_redist"));
     }
 
     /// Serves `body` (honouring a resume offset).
@@ -377,24 +300,31 @@ mod tests {
         pin.sha256 = rea_launcher::identify::sha256(&body);
         pin.size = body.len() as u64;
         pin.unpacked_size = 100;
-        let progress = Progress::default();
-        let dir = install(&pin, &root, &|_| None, &Serve(body), &progress).unwrap();
-        assert_eq!(progress.after(), After::Done(dir.clone()));
-        assert_eq!(dlls(&dir).len(), 2);
+        let job = Job::default();
+        let dir = install(&pin, &root, &|_| None, &Serve(body), &job).unwrap();
+        assert_eq!(job.phase(), Phase::Done(dir.clone()));
+        assert_eq!(download::installed(&pin, &root), Some(dir.clone()));
+        assert_eq!(dlls(&dir), ["D3DCompiler_43.dll", "d3dx9_35.dll"]);
+        assert_eq!(fs::read(dir.join("d3dx9_35.dll")).unwrap(), b"d3dx 35");
+        assert_eq!(override_names(&dlls(&dir)), ["d3dcompiler_43", "d3dx9_35"]);
         assert!(!root.join(pin.file_name()).exists(), "package deleted");
+        // Remove takes the folder and any leftovers.
+        download::remove(&pin, &root).unwrap();
+        assert_eq!(download::installed(&pin, &root), None);
         // A wrong download is refused and nothing is unpacked.
         let root2 = temp("install-bad");
-        let progress = Progress::default();
-        let error = install(
-            &pin,
-            &root2,
-            &|_| None,
-            &Serve(b"tampered".to_vec()),
-            &progress,
-        );
+        let job = Job::default();
+        let error = install(&pin, &root2, &|_| None, &Serve(b"tampered".to_vec()), &job);
         assert!(error.is_err());
-        assert!(matches!(progress.after(), After::Failed(_)));
-        assert_eq!(installed(&pin, &root2), None);
+        assert!(matches!(job.phase(), Phase::Failed(_)));
+        assert_eq!(download::installed(&pin, &root2), None);
+        // A package without the DLLs fails the unpack; nothing is marked.
+        let empty = cabinet(&[("DXSETUP.exe", b"MZ")]);
+        pin.sha256 = rea_launcher::identify::sha256(&empty);
+        pin.size = empty.len() as u64;
+        let job = Job::default();
+        assert!(install(&pin, &root2, &|_| None, &Serve(empty), &job).is_err());
+        assert_eq!(download::installed(&pin, &root2), None);
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(root2).unwrap();
     }
