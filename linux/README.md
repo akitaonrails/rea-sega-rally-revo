@@ -12,9 +12,10 @@ zip and the AppImage (in this repository it is the vendored
   seeded once per prefix before Wine starts; existing values are kept, so
   setting `DisableHidraw`/`DisableInput` to 0 in the prefix reverts it
   (see CHANGELOG)
-- optional `winetricks d3dx9 directplay d3dcompiler_47` when `winetricks`
-  is installed — the offline DirectX runtime equivalents that stop this
-  game's main-menu access violation (skip with `SRR_WINETRICKS=off`)
+- no winetricks: Wine's own DirectX 9 pieces run the game; Microsoft's
+  DirectX 9 files, if you want them, come from the settings window's
+  **Download** button (or `SRRLauncher.exe --download-directx`) and go into
+  the private game copy, not the prefix
 - the NVIDIA Vulkan ICD pinned (`VK_DRIVER_FILES` and the older
   `VK_ICD_FILENAMES`) on hybrid-GPU hosts that really have an NVIDIA GPU, so
   DXVK cannot render on the integrated GPU (that failure presents as a black screen while the
@@ -46,7 +47,6 @@ A GPU choice you already made (`VK_DRIVER_FILES`, `VK_ICD_FILENAMES`,
 | `SRR_LAUNCHER` | next to `srr-play` | path to `SRRLauncher.exe` |
 | `SRR_RUN` | empty | prefix for the wine commands, e.g. `distrobox enter gaming --` |
 | `SRR_WAIT` | unset | run in the foreground (used by the AppImage) |
-| `SRR_WINETRICKS` | `auto` | `off` skips the winetricks bootstrap |
 
 State lives in `~/.config/srr-launcher` (`running.pid`, `play.log`,
 `settings.log`, `inner.sh`). `running.pid` holds the session leader's pid
@@ -62,6 +62,6 @@ the helper (the tests point the library's test seams, `REA_ICD_DIRS`,
 
 Add the AppImage as a non-Steam game: it runs this wrapper with everything
 above. Adding `SRRLauncher.exe` with a forced Proton version also works, but
-skips this wrapper: no GPU pinning, no winetricks. The launcher itself
+skips this wrapper: no GPU pinning. The launcher itself
 seeds the controller bridge into Proton's prefix (values that are already
 there are kept); it takes effect from the second start. The frame limit still applies through Proton's own DXVK.

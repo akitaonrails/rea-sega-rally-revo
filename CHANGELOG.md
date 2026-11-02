@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`srr-play` no longer runs winetricks.** It used to install `d3dx9`,
+  `directplay` and `d3dcompiler_47` into the prefix when winetricks
+  happened to be installed (a silent, unrequested download). Wine's own
+  DirectX 9 pieces were enough in our runs, including the recorded race,
+  which ran without winetricks; the DirectX 9 files are the window's
+  Download button now. `SRR_WINETRICKS` is gone. Prefixes that already
+  have them keep them.
 - **One option table for the window, `launcher.cfg` and the command
   line.** `--help`, the first-run `launcher.cfg` and the window's labels
   and descriptions come from it, and a test fails if the window and the

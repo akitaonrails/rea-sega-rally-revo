@@ -4,7 +4,7 @@
 set -u
 HERE=$(dirname "$(readlink -f "$0")")
 T=$(mktemp -d)
-export T HOME=$T SRR_PREFIX=$T/prefix SRR_WINETRICKS=off
+export T HOME=$T SRR_PREFIX=$T/prefix
 unset SRR_WAIT
 STALE_PID= STALE_START= OTHER_PID= OTHER_START=
 REA_FUNCTIONS_ONLY=1 REA_PLAY_HERE=$HERE/.. . "$HERE/../srr-play"

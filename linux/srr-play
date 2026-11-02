@@ -11,9 +11,6 @@
 #  - a private Wine prefix at ~/.local/share/srr-launcher/prefix
 #  - Wine's SDL controller bridge for this game (Map Controllers=1) and
 #    duplicate raw-input devices disabled (winebus registry)
-#  - optional winetricks d3dx9/directplay/d3dcompiler_47 when winetricks is
-#    installed (the offline DirectX runtime equivalents that stop this
-#    game's main-menu access violation)
 #  - the NVIDIA Vulkan ICD pinned on hybrid-GPU hosts with an NVIDIA card,
 #    so DXVK cannot land on the integrated GPU (a black screen)
 #  - no gamescope of its own: this DXVK title on hybrid hosts routes
@@ -21,7 +18,11 @@
 #    the launcher's isolated Wine desktop handles fullscreen instead
 #
 # Environment: SRR_PREFIX, SRR_LAUNCHER, SRR_RUN (e.g. "distrobox enter
-# gaming --"), SRR_WAIT (the AppImage), SRR_WINETRICKS=off.
+# gaming --"), SRR_WAIT (the AppImage).
+#
+# No winetricks: Microsoft's DirectX 9 files, if a player wants them, come
+# from the settings window's Download button (SRRLauncher.exe
+# --download-directx), which puts them in the private game copy.
 set -u
 
 # The library: next to this script in a package, else the vendored copy.
@@ -61,30 +62,12 @@ REA_GAME_PROCS='SEGA Rally.exe|SEGA Rally_SSE1'
 REA_WINEBUS_MARKER=.srr-winebus-v2
 REA_DIRECT_NOTE="starting (isolated Wine desktop, frame limit via DXVK)"
 
-# The offline DirectX runtime equivalents: the community setup installs
-# d3dx9 + directplay (+ d3dcompiler_47 as a DXVK safeguard) to stop a
-# repeatable main-menu access violation. Best effort — only when
-# winetricks is available; SRR_WINETRICKS=off skips it. Runs under
-# rea_once: a skip returns non-zero, so it is tried again next time.
-seed_winetricks() {
-  [ "${SRR_WINETRICKS:-auto}" = "off" ] && return 1
-  rea_run sh -c "command -v winetricks" >/dev/null 2>&1 || {
-    echo "note: winetricks not found; if the game crashes at the main menu,"
-    echo "install winetricks (d3dx9 directplay d3dcompiler_47) and rerun"
-    return 1
-  }
-  echo "installing d3dx9 directplay d3dcompiler_47 (once)"
-  rea_run env WINEPREFIX="$REA_PREFIX" winetricks -q d3dx9 directplay d3dcompiler_47 >/dev/null 2>&1
-  return 0
-}
-
 # Both the window and the game read pads through Wine's bus, so the prefix
 # is prepared before either starts. SRRLauncher.exe seeds the same winebus
 # values itself under any Wine/Proton; seeding here as well means the bus
 # already starts with them on a brand-new prefix.
 bootstrap() {
   rea_seed_winebus
-  rea_once .srr-tricks seed_winetricks || true   # skipped: retried next time
 }
 rea_hook_before_settings() { bootstrap; }
 rea_hook_before_start() { bootstrap; }
