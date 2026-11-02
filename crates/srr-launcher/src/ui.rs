@@ -219,6 +219,8 @@ struct Window<'a> {
     resolutions: Vec<(Option<(u32, u32)>, String)>,
     pads: usize,
     linux: bool,
+    /// DXVK will run the game (Linux helper, Wine or Proton).
+    dxvk: bool,
     portrait: Option<TextureHandle>,
     path: PathBuf,
     text: String,
@@ -253,6 +255,7 @@ impl<'a> Window<'a> {
             resolutions: form::resolutions(screen),
             pads: win32::xinput_pads().len(),
             linux,
+            dxvk: linux || win32::is_wine(),
             portrait: load_portrait(ctx),
             path,
             text,
@@ -277,9 +280,8 @@ impl<'a> Window<'a> {
             self.tab = Tab::Play;
             return;
         }
-        if !self.pacer_available() {
-            self.form.stutter_fix = false;
-        }
+        // A folder without the clean SSE1 exe only skips the fix at launch;
+        // the saved choice stays for when the clean exe is there.
         let saved = self.form.save(&self.text, self.screen);
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -525,7 +527,7 @@ impl Window<'_> {
         heading(ui, "Look");
         ui.add_space(6.0);
         let modern_note = match Picture::MODERN.resolved(self.screen).resolution {
-            Some((width, height)) => format!("{width}×{height}, High, 60 fps cap."),
+            Some((width, height)) => format!("{width}×{height}, High."),
             None => "High graphics at your screen's size.".to_string(),
         };
         let cards = [
@@ -533,12 +535,12 @@ impl Window<'_> {
             (
                 Look::SteamDeck,
                 "Steam Deck",
-                "1280×800, High, 60 fps cap.".to_string(),
+                "1280×800, High, 16:10.".to_string(),
             ),
             (
                 Look::Original,
                 "Original 2007",
-                "1280×720, Normal, 60 fps cap.".to_string(),
+                "1280×720, Normal.".to_string(),
             ),
             (
                 Look::Custom,
@@ -606,14 +608,17 @@ impl Window<'_> {
                 ui,
                 &FrameLimit::ALL.map(|limit| (limit, limit.label())),
                 &mut self.form.frame_limit,
-                true,
+                self.dxvk,
             );
         });
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(if self.dxvk {
                 "The limit runs through DXVK's frame limiter, the community-standard pacing \
-                 guard. Championship mode caps itself at 62.5 fps regardless.",
-            )
+                 guard. With vsync on, the display's refresh caps the game too."
+            } else {
+                "The frame limit needs DXVK (Linux, Wine or Proton). On Windows the game \
+                 follows vsync instead."
+            })
             .font(font(13.0))
             .color(MUTED),
         );
@@ -648,8 +653,8 @@ impl Window<'_> {
         });
         ui.label(
             egui::RichText::new(
-                "21:9 and 32:9 patch the aspect tables of the private copy; 16:9 and 16:10 \
-                 are the game's own modes.",
+                "21:9 and 32:9 patch the aspect tables of the private copy. 16:9 and 16:10 \
+                 need no patch: the game picks between them from the resolution.",
             )
             .font(font(13.0))
             .color(MUTED),
@@ -663,7 +668,6 @@ impl Window<'_> {
             )
         });
         row(ui, "", &mut |ui| {
-            toggle(ui, &mut picture.fullscreen, "Fullscreen");
             toggle(ui, &mut picture.vsync, "Vsync (60 Hz)");
         });
         if self.form.picture != before {
@@ -705,8 +709,8 @@ impl Window<'_> {
                 self.rumble_test = Some(if took == 0 {
                     "No pad accepted rumble. Check the pad connection and X-input mode.".to_string()
                 } else {
-                    "Sent for half a second (menu navigation only; keep in-game force \
-                     feedback off)."
+                    "Sent for half a second: the pad accepts rumble. This only tests the \
+                     pad; keep in-game force feedback off."
                         .to_string()
                 });
             }

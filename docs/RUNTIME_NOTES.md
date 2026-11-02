@@ -115,3 +115,24 @@ Found along the way: closing the settings window without Play ended
 `srr-play` silently, and the settings step's stderr went to `/dev/null`.
 It now says why it stopped and keeps that output in
 `~/.config/srr-launcher/settings.log`.
+
+## 2026-11-02 — v0.1.1: option audit and quality presets
+
+Same headless harness (gaming distrobox, gamescope headless at 3840x2160,
+RTX 5090, throwaway prefix). The game folder was reached through a Wine
+drive `D:` mapped to a symlink, so screenshots show no developer path.
+
+- `--quality ultra`: config.ini got every quality slider at 3; the game
+  reached its title and ran the Alpine attract demo at 4K.
+- `--quality normal`: every slider at 2; the game ran its attract-mode
+  menus at 4K.
+- The settings window's three tabs were captured for the README
+  (`docs/images/`) with the rebuilt exe, driving the tabs with XTest clicks.
+- The ultra-wide + stutter fix failure (aspect patch changing the exe's
+  hash) was found by code audit, not by a run: the reference host is 16:9.
+  The fix is covered by the env-gated `real_game` test (clean → pacer →
+  21:9 → still identified as the stutter-fixed build), which passed against
+  the real exe.
+
+Not verified: the gamepad mapping change on a real pad (unit-tested
+against the XInput bit values only); the frame limit under Steam's Proton.

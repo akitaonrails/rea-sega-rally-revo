@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.1.1 - 2026-11-02
+
+Fixes from an audit of every option against its wiring, tests and docs:
+
+- Ultra-wide aspect (21:9, 32:9) no longer breaks the stutter fix from the
+  second launch on. The patched aspect tables changed the exe's hash, so
+  the launcher refused its own copy. Auto picks 21:9 on 3440×1440 screens,
+  so ultra-wide users hit this with default settings.
+- The settings window's gamepad buttons now do what the window says: d-pad
+  moves, A changes a setting, LB/RB switch tabs, Start plays (A used to
+  start the game and the bumpers did nothing).
+- The frame limit now applies under any Wine or Proton, including Steam
+  starting `SRRLauncher.exe` directly. On native Windows, which has no DXVK,
+  the buttons are disabled with an explanation.
+- Removed the Fullscreen option: the game ignores windowed mode, and turning
+  it off under Wine skipped the isolated Wine desktop that prevents the
+  multi-monitor crash. `--fullscreen` is now an unknown option; old
+  `fullscreen` keys in `launcher.cfg` are ignored.
+- `language` in `launcher.cfg` is validated like `--language`.
+- The window no longer saves the stutter fix as off when the chosen folder
+  lacks the clean exe.
+- `--settings` reports other options instead of ignoring them.
+- Look cards no longer promise a 60 fps cap the presets do not set; the
+  rumble test and aspect texts say what they actually do.
+- Normal and Ultra quality were run on the real game for the first time
+  (both render at 4K).
+- New README: what the launcher fixes, install, first run, every option
+  across the window, `launcher.cfg` and the command line, and screenshots
+  of each tab.
+- Removed dead code (an unused key list, an unused config reader in
+  `srr-play`).
+
 ## v0.1.0 - 2026-11-01
 
 First release. A plug-and-play launcher for the user's own Sega Rally Revo

@@ -20,12 +20,13 @@ game needs already wired:
 
 ```sh
 srr-play            # settings window, then play
-srr-play --play     # play with saved settings (no window)
+srr-play --play     # play with saved settings (no window); "start" works too
 srr-play stop       # end the game and the Wine server
 srr-play status     # running or idle
 ```
 
-Exit codes of the settings run: 0 play, 3 window closed, 4 no window.
+Exit codes of the settings run: 0 play, 3 window closed, 4 no window. When
+the window closes without Play, `srr-play` says so and starts nothing.
 
 ## Environment
 
@@ -33,19 +34,19 @@ Exit codes of the settings run: 0 play, 3 window closed, 4 no window.
 | --- | --- | --- |
 | `SRR_PREFIX` | `~/.local/share/srr-launcher/prefix` | private Wine prefix |
 | `SRR_LAUNCHER` | next to `srr-play` | path to `SRRLauncher.exe` |
-| `SRR_RUN` | empty | prefix for wine/gamescope commands, e.g. `distrobox enter gaming --` |
+| `SRR_RUN` | empty | prefix for the wine commands, e.g. `distrobox enter gaming --` |
 | `SRR_WAIT` | unset | run in the foreground (used by the AppImage) |
 | `SRR_WINETRICKS` | `auto` | `off` skips the winetricks bootstrap |
 | `SRR_ICD_DIR` | `/usr/share/vulkan/icd.d` | Vulkan ICD directory (tests) |
 | `SRR_SYSFS` | `/sys` | sysfs root (tests) |
 
 State lives in `~/.config/srr-launcher` (`running.pid`, `play.log`,
-`settings.log`, `inner.sh`). Run `sh linux/tests/gpu-env.sh`,
-`sh linux/tests/config-keys.sh`, and `sh linux/tests/game-alive.sh` to
-exercise the host-side helpers.
+`settings.log`, `inner.sh`). Run `sh linux/tests/gpu-env.sh` and
+`sh linux/tests/game-alive.sh` to exercise the host-side helpers.
 
 ## Steam
 
-Add `SRRLauncher.exe` as a non-Steam game with
-`WINEPREFIX=$HOME/.local/share/srr-launcher/prefix` in the launch options
-(Proton works too), or add the AppImage directly.
+Add the AppImage as a non-Steam game: it runs this wrapper with everything
+above. Adding `SRRLauncher.exe` with a forced Proton version also works, but
+skips this wrapper: no controller-bridge seeding, no GPU pinning, no
+winetricks. The frame limit still applies through Proton's own DXVK.

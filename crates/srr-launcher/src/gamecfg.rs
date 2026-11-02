@@ -9,35 +9,6 @@
 
 use crate::config::Quality;
 
-/// Every `[Graphics]` key the original launcher writes, in its order.
-pub const GRAPHICS_KEYS: [&str; 25] = [
-    "AdapterOrdinal",
-    "RenderDevice",
-    "AdapterFormat",
-    "HorizontalResolution",
-    "VerticalResolution",
-    "BackBufferFormat",
-    "DepthStencilFormat",
-    "AntiAliasingLevel",
-    "MultisampleType",
-    "MultisampleQuality",
-    "ShaderVersion",
-    "GraphicQuality",
-    "ShadowQuality",
-    "ReflectionQuality",
-    "TrackQuality",
-    "TextureQuality",
-    "ShaderQuality",
-    "DrawDistanceQuality",
-    "ParticleQuality",
-    "RearViewMirrorQuality",
-    "MudQuality",
-    "VSync",
-    "RefreshRate",
-    "ResolutionFilter",
-    "RunWindowed",
-];
-
 /// The per-feature values of each preset. The game's own quality scale is
 /// LOWEST=0, LOW=1, NORMAL=2, HIGH=3 (from the original settings
 /// launcher's enum). `High` is the exact configuration proven on the
@@ -239,7 +210,6 @@ pub fn registry_values(runtime_windows_path: &str, language: &str) -> [(&'static
 /// violation.
 pub struct DocumentsPaths {
     pub saved_games: std::path::PathBuf,
-    pub shared_data: std::path::PathBuf,
     pub rank_table: std::path::PathBuf,
     pub ghosts: std::path::PathBuf,
 }
@@ -256,7 +226,6 @@ pub fn documents_paths(profile: &std::path::Path, public: &std::path::Path) -> D
     DocumentsPaths {
         rank_table: shared.join("Rank Table"),
         ghosts: shared.join("Ghosts"),
-        shared_data: shared,
         saved_games,
     }
 }

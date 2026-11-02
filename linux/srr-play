@@ -29,20 +29,6 @@ fi
 RUN=${SRR_RUN:-}
 STATE=$HOME/.config/srr-launcher
 mkdir -p "$STATE" "$PREFIX"
-CFG=
-if [ -n "$LAUNCHER" ]; then
-  for p in "$(dirname "$LAUNCHER")/launcher.cfg" "$(dirname "$(dirname "$LAUNCHER")")/launcher.cfg"; do
-    [ -f "$p" ] && CFG=$(readlink -f "$p")
-  done
-fi
-if [ -z "$CFG" ]; then
-  for d in "$PREFIX"/drive_c/users/*/AppData/Local/SRRLauncher; do
-    case "$d" in */users/Public/*|*'*'*) continue ;; esac
-    [ -d "$d" ] && CFG=$d/launcher.cfg
-  done
-  [ -z "$CFG" ] && CFG=$PREFIX/drive_c/users/$USER/AppData/Local/SRRLauncher/launcher.cfg
-fi
-get_key() { [ -f "$CFG" ] && sed -n "s|^$1 *= *||p" "$CFG" | tail -1; }
 LOCK=$STATE/running.pid
 # True while a game process is alive. Zombies do not count: pgrep lists
 # them, and a crashed or killed session can leave one behind, which would

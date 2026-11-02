@@ -27,10 +27,6 @@ impl Aspect {
         }
     }
 
-    pub fn label(self) -> &'static str {
-        self.key()
-    }
-
     /// The value the renderer should use.
     pub fn ratio(self) -> f32 {
         match self {
@@ -153,7 +149,6 @@ pub struct Settings {
     pub resolution: Option<(u32, u32)>,
     pub aspect: Option<Aspect>,
     pub quality: Option<Quality>,
-    pub fullscreen: Option<bool>,
     pub vsync: Option<bool>,
     pub frame_limit: Option<FrameLimit>,
     pub stutter_fix: Option<bool>,
@@ -179,7 +174,6 @@ game =
 # The game's own preset: normal, high (default) or ultra.
 #quality = high
 
-fullscreen = true
 vsync = true
 
 # Frame limit through DXVK: 60 (default), 120 or off.
@@ -202,7 +196,6 @@ pub const USAGE: &str = concat!(
     "  --resolution <WxH>    e.g. 3840x2160\n",
     "  --aspect <ratio>      16:9, 16:10, 21:9 or 32:9\n",
     "  --quality <preset>    normal, high or ultra\n",
-    "  --fullscreen on|off   fullscreen or windowed\n",
     "  --vsync on|off        wait for the display refresh\n",
     "  --frame-limit <fps>   60, 120 or off\n",
     "  --stutter-fix on|off  community pacer fix on the private copy\n",
@@ -210,10 +203,18 @@ pub const USAGE: &str = concat!(
     "  --check               validate the game and exit\n",
     "  --setup               prepare the runtime and settings without playing\n",
     "  --no-window           play with saved settings, no launcher window\n",
-    "  --settings [--linux]  only show settings\n",
+    "  --settings            only show the settings window\n",
+    "  --linux               running under srr-play/AppImage: install DXVK into the copy\n",
     "  --help                show this help\n\n",
     "Options override launcher.cfg for one run; only --game is remembered."
 );
+
+/// The registry spelling of a supported menu language, any case.
+fn canonical_language(value: &str) -> Option<&'static str> {
+    LANGUAGES
+        .into_iter()
+        .find(|language| language.eq_ignore_ascii_case(value.trim()))
+}
 
 fn parse_bool(value: &str) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
@@ -270,10 +271,6 @@ impl Settings {
                     Some(value) => settings.quality = Some(value),
                     None => bad(),
                 },
-                "fullscreen" => match parse_bool(value) {
-                    Some(value) => settings.fullscreen = Some(value),
-                    None => bad(),
-                },
                 "vsync" => match parse_bool(value) {
                     Some(value) => settings.vsync = Some(value),
                     None => bad(),
@@ -286,9 +283,10 @@ impl Settings {
                     Some(value) => settings.stutter_fix = Some(value),
                     None => bad(),
                 },
-                "language" => {
-                    settings.language = Some(value.to_string());
-                }
+                "language" => match canonical_language(value) {
+                    Some(language) => settings.language = Some(language.to_string()),
+                    None => bad(),
+                },
                 _ => {}
             }
         }
@@ -327,13 +325,6 @@ impl Settings {
                             .ok_or_else(|| format!("invalid quality {text}\n\n{USAGE}"))?,
                     );
                 }
-                "--fullscreen" => {
-                    let text = value("--fullscreen")?;
-                    settings.fullscreen = Some(
-                        parse_bool(&text)
-                            .ok_or_else(|| format!("invalid fullscreen value {text}"))?,
-                    );
-                }
                 "--vsync" => {
                     let text = value("--vsync")?;
                     settings.vsync = Some(
@@ -356,11 +347,9 @@ impl Settings {
                 }
                 "--language" => {
                     let text = value("--language")?;
-                    let language = LANGUAGES
-                        .iter()
-                        .find(|language| language.eq_ignore_ascii_case(&text))
+                    let language = canonical_language(&text)
                         .ok_or_else(|| format!("invalid language {text}\n\n{USAGE}"))?;
-                    settings.language = Some((*language).to_string());
+                    settings.language = Some(language.to_string());
                 }
                 _ => return Err(format!("unknown option {arg}\n\n{USAGE}")),
             }
@@ -375,7 +364,6 @@ impl Settings {
             resolution: over.resolution.or(self.resolution),
             aspect: over.aspect.or(self.aspect),
             quality: over.quality.or(self.quality),
-            fullscreen: over.fullscreen.or(self.fullscreen),
             vsync: over.vsync.or(self.vsync),
             frame_limit: over.frame_limit.or(self.frame_limit),
             stutter_fix: over.stutter_fix.or(self.stutter_fix),
@@ -440,16 +428,6 @@ pub fn set_key(text: &str, key: &str, value: &str) -> String {
     out
 }
 
-pub fn clear_key(text: &str, key: &str) -> String {
-    let mut out = text
-        .lines()
-        .filter(|line| !entry(line).is_some_and(|(candidate, _)| candidate == key))
-        .collect::<Vec<_>>()
-        .join("\n");
-    out.push('\n');
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,10 +469,44 @@ mod tests {
 
     #[test]
     fn invalid_values_warn_or_fail() {
-        let (_, warnings) = Settings::parse_file("resolution = huge\nframe-limit = 7\n");
-        assert_eq!(warnings.len(), 2);
-        assert!(Settings::parse_args(["--frame-limit".into(), "7".into()]).is_err());
-        assert!(Settings::parse_args(["--language".into(), "Klingon".into()]).is_err());
+        let (settings, warnings) = Settings::parse_file(
+            "resolution = huge\nframe-limit = 7\nlanguage = Klingon\nvsync = maybe\naspect = 5:4\n",
+        );
+        assert_eq!(warnings.len(), 5);
+        assert_eq!(settings.language, None);
+        let args = |list: &[&str]| Settings::parse_args(list.iter().map(|a| a.to_string()));
+        for bad in [
+            &["--frame-limit", "7"][..],
+            &["--language", "Klingon"],
+            &["--vsync", "maybe"],
+            &["--stutter-fix", "sometimes"],
+            &["--aspect", "5:4"],
+            &["--quality", "insane"],
+            &["--resolution", "100x100"],
+            &["--fullscreen", "off"],
+            &["--bogus"],
+            &["--game"],
+        ] {
+            assert!(args(bad).is_err(), "{bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn values_are_case_insensitive_and_canonical() {
+        let (settings, warnings) =
+            Settings::parse_file("language = french\nquality = HIGH\nstutter-fix = off\n");
+        assert!(warnings.is_empty());
+        assert_eq!(settings.language.as_deref(), Some("French"));
+        assert_eq!(settings.quality, Some(Quality::High));
+        assert_eq!(settings.stutter_fix, Some(false));
+        let cli = Settings::parse_args(["--language".into(), "POLISH".into()]).unwrap();
+        assert_eq!(cli.language.as_deref(), Some("Polish"));
+    }
+
+    #[test]
+    fn removed_keys_in_old_files_are_ignored() {
+        let (_, warnings) = Settings::parse_file("fullscreen = false\n");
+        assert!(warnings.is_empty());
     }
 
     #[test]
@@ -502,8 +514,6 @@ mod tests {
         let text = "# hello\nquality = normal\nvsync = true\n";
         let text = set_key(text, "quality", "high");
         assert!(text.contains("# hello\nquality = high\n"));
-        let text = clear_key(&text, "vsync");
-        assert!(!text.contains("vsync = true"));
     }
 
     #[test]

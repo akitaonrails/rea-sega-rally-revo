@@ -342,6 +342,16 @@ pub fn is_native_aspect(ratio: f32) -> bool {
     (ratio - 16.0 / 9.0).abs() < 0.02 || (ratio - 1.6).abs() < 0.02
 }
 
+/// Identify a private copy whatever ultra-wide ratio a previous launch
+/// patched into its aspect tables: the hash is taken with the tables reset
+/// to the original 16:9 constant.
+pub fn identify_ignoring_aspect(exe: &[u8]) -> Result<&'static crate::edition::Edition, [u8; 32]> {
+    let mut probe = exe.to_vec();
+    // aspect() cannot fail; it only reports how many slots changed.
+    let _ = aspect(&mut probe, 16.0 / 9.0);
+    crate::edition::identify(&probe)
+}
+
 /// Every 16:9 slot of an aspect table, whatever value it currently holds.
 fn aspect_slots(data: &[u8]) -> Vec<usize> {
     let mut slots = Vec::new();
@@ -539,5 +549,11 @@ mod tests {
         let slots = aspect_slots(&data);
         println!("aspect slots: {slots:#x?}");
         assert_eq!(slots, vec![0x2F7C44, 0x2FADA8]);
+        // An ultra-wide launch must not hide the stutter-fixed build.
+        aspect(&mut data, 21.0 / 9.0).unwrap();
+        assert!(std::ptr::eq(
+            identify_ignoring_aspect(&data).unwrap(),
+            &crate::edition::SSE1_PACER
+        ));
     }
 }

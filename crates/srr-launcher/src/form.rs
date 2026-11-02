@@ -5,7 +5,6 @@ pub struct Picture {
     pub resolution: Option<(u32, u32)>,
     pub aspect: Option<Aspect>,
     pub quality: Quality,
-    pub fullscreen: bool,
     pub vsync: bool,
 }
 
@@ -14,7 +13,6 @@ impl Picture {
         resolution: None,
         aspect: None,
         quality: Quality::High,
-        fullscreen: true,
         vsync: true,
     };
 
@@ -22,7 +20,6 @@ impl Picture {
         resolution: Some(STEAM_DECK_SCREEN),
         aspect: Some(Aspect::Ratio1610),
         quality: Quality::High,
-        fullscreen: true,
         vsync: true,
     };
 
@@ -30,7 +27,6 @@ impl Picture {
         resolution: Some((1280, 720)),
         aspect: Some(Aspect::Ratio169),
         quality: Quality::Normal,
-        fullscreen: true,
         vsync: true,
     };
 
@@ -74,7 +70,6 @@ impl Form {
             resolution: settings.resolution,
             aspect: settings.aspect,
             quality: settings.effective_quality(),
-            fullscreen: settings.fullscreen.unwrap_or(true),
             vsync: settings.vsync.unwrap_or(true),
         };
         Form {
@@ -135,7 +130,6 @@ impl Form {
         );
         out = config::set_key(&out, "aspect", picture.aspect.unwrap().key());
         out = config::set_key(&out, "quality", picture.quality.key());
-        out = config::set_key(&out, "fullscreen", &picture.fullscreen.to_string());
         out = config::set_key(&out, "vsync", &picture.vsync.to_string());
         out = config::set_key(&out, "frame-limit", self.frame_limit.key());
         out = config::set_key(&out, "stutter-fix", &self.stutter_fix.to_string());
@@ -194,17 +188,32 @@ pub enum PadAction {
     PreviousTab,
 }
 
+/// XInput button bits (`XINPUT_GAMEPAD_*`).
+pub mod xinput {
+    pub const DPAD_UP: u16 = 0x0001;
+    pub const DPAD_DOWN: u16 = 0x0002;
+    pub const DPAD_LEFT: u16 = 0x0004;
+    pub const DPAD_RIGHT: u16 = 0x0008;
+    pub const START: u16 = 0x0010;
+    pub const LEFT_SHOULDER: u16 = 0x0100;
+    pub const RIGHT_SHOULDER: u16 = 0x0200;
+    pub const A: u16 = 0x1000;
+}
+
+/// Window navigation: d-pad moves between controls, A changes the focused
+/// one, LB/RB switch tabs, Start plays.
 pub fn pad_actions(previous: u16, current: u16) -> Vec<PadAction> {
     let pressed = current & !previous;
     let mut actions = Vec::new();
     for (mask, action) in [
-        (0x1000, PadAction::Play),
-        (0x0010, PadAction::PreviousTab),
-        (0x0020, PadAction::NextTab),
-        (0x0001, PadAction::Next),
-        (0x0002, PadAction::Previous),
-        (0x0004, PadAction::Press),
-        (0x0008, PadAction::Press),
+        (xinput::START, PadAction::Play),
+        (xinput::LEFT_SHOULDER, PadAction::PreviousTab),
+        (xinput::RIGHT_SHOULDER, PadAction::NextTab),
+        (xinput::DPAD_DOWN, PadAction::Next),
+        (xinput::DPAD_RIGHT, PadAction::Next),
+        (xinput::DPAD_UP, PadAction::Previous),
+        (xinput::DPAD_LEFT, PadAction::Previous),
+        (xinput::A, PadAction::Press),
     ] {
         if pressed & mask != 0 {
             actions.push(action);
@@ -253,6 +262,27 @@ mod tests {
     }
 
     #[test]
+    fn every_field_survives_save_and_load() {
+        let mut form = Form::first_run(SCREEN);
+        form.game = r"D:\Games\Sega Rally".into();
+        form.set_look(Look::SteamDeck, SCREEN);
+        form.picture.vsync = false;
+        form.frame_limit = FrameLimit::Off;
+        form.stutter_fix = false;
+        form.language = "Polish".into();
+        let (settings, warnings) = Settings::parse_file(&form.save(config::TEMPLATE, SCREEN));
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let loaded = Form::new(&settings, SCREEN);
+        assert_eq!(loaded.game, form.game);
+        assert_eq!(loaded.picture, form.picture.resolved(SCREEN));
+        assert_eq!(loaded.frame_limit, FrameLimit::Off);
+        assert!(!loaded.stutter_fix);
+        assert_eq!(loaded.language, "Polish");
+        // vsync off makes it a custom look, not the Steam Deck preset
+        assert_eq!(loaded.look, Look::Custom);
+    }
+
+    #[test]
     fn one_changed_value_is_custom() {
         let mut form = Form::first_run(SCREEN);
         form.picture.quality = Quality::Ultra;
@@ -261,7 +291,19 @@ mod tests {
 
     #[test]
     fn pad_buttons_are_edge_triggered() {
-        assert_eq!(pad_actions(0, 0x1000), [PadAction::Play]);
-        assert!(pad_actions(0x1000, 0x1000).is_empty());
+        assert_eq!(pad_actions(0, xinput::START), [PadAction::Play]);
+        assert!(pad_actions(xinput::START, xinput::START).is_empty());
+    }
+
+    #[test]
+    fn pad_buttons_match_the_documented_layout() {
+        // Pinned to the XINPUT_GAMEPAD_* values, not to our own constants.
+        assert_eq!(pad_actions(0, 0x1000), [PadAction::Press]); // A
+        assert_eq!(pad_actions(0, 0x0010), [PadAction::Play]); // Start
+        assert_eq!(pad_actions(0, 0x0100), [PadAction::PreviousTab]); // LB
+        assert_eq!(pad_actions(0, 0x0200), [PadAction::NextTab]); // RB
+        assert_eq!(pad_actions(0, 0x0002), [PadAction::Next]); // d-pad down
+        assert_eq!(pad_actions(0, 0x0001), [PadAction::Previous]); // d-pad up
+        assert!(pad_actions(0, 0x0020).is_empty()); // Back does nothing
     }
 }

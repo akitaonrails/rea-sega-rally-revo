@@ -158,6 +158,15 @@ mod app {
         let no_window = take_flag(&mut cli, "--no-window");
         let check_only = take_flag(&mut cli, "--check");
         let setup_only = take_flag(&mut cli, "--setup");
+        // Validate options up front, so a typo is reported even when the
+        // window opens instead of playing.
+        let overrides = Settings::parse_args(cli.clone())?;
+        if settings_only && !cli.is_empty() {
+            return Err(format!(
+                "--settings opens the window and takes no other options (got {})",
+                cli.join(" ")
+            ));
+        }
         if settings_only || (cli.is_empty() && !no_window && !check_only && !setup_only) {
             if win32::is_wine() {
                 match win32::prefer_gpu_opengl() {
@@ -192,7 +201,7 @@ mod app {
         for warning in warnings {
             log_line(&format!("warning: {warning}"));
         }
-        let settings = saved.clone().merged(Settings::parse_args(cli)?);
+        let settings = saved.clone().merged(overrides);
         let game = find_game(&settings)?;
 
         let main_bytes = read_exe(&game, edition::MAIN_EXE);
@@ -270,12 +279,15 @@ mod app {
         if stutter_fix {
             let mut bytes = read_exe(&runtime_dir, edition::SSE1_EXE)
                 .ok_or("the private SSE1 copy disappeared")?;
-            match edition::identify(&bytes) {
+            // A previous ultra-wide launch rewrote the aspect tables; judge the
+            // build without them (the aspect step below sets them again).
+            match patches::identify_ignoring_aspect(&bytes) {
                 Ok(edition) if std::ptr::eq(edition, &edition::SSE1_PACER) => {
                     pacer_done = true;
                     log_line("stutter fix: already applied to the private copy");
                 }
                 Ok(edition) if std::ptr::eq(edition, &edition::SSE1_CLEAN) => {
+                    let _ = patches::aspect(&mut bytes, 16.0 / 9.0);
                     match patches::pacer(&mut bytes) {
                         Ok(true) => {
                             write_exe(&runtime_dir, edition::SSE1_EXE, &bytes)?;
@@ -295,7 +307,7 @@ mod app {
                 }
             }
         }
-        editions.sse1 = edition::identify(
+        editions.sse1 = patches::identify_ignoring_aspect(
             &read_exe(&runtime_dir, edition::SSE1_EXE).ok_or("cannot re-read the SSE1 copy")?,
         );
 
@@ -311,11 +323,10 @@ mod app {
         log_line(&format!("launch executable: {launch_name}"));
 
         let screen = win32::screen_size();
-        let mut picture = Picture {
+        let picture = Picture {
             resolution: settings.resolution,
             aspect: settings.aspect,
             quality: settings.effective_quality(),
-            fullscreen: settings.fullscreen.unwrap_or(true),
             vsync: settings.vsync.unwrap_or(true),
         }
         .resolved(screen);
@@ -323,26 +334,23 @@ mod app {
         let gamescope = std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_some();
         let (width, height) = picture.resolution.unwrap();
         let mode_supported = wine || win32::display_mode_supported(width, height);
-        let (fullscreen, fallback) = display::effective_fullscreen(
-            picture.fullscreen,
+        let display_plan = display::plan(
             wine,
             gamescope,
             screen.is_some_and(|(width, height)| width < height),
             mode_supported,
         );
-        picture.fullscreen = fullscreen;
-        if let Some(reason) = fallback {
-            match reason {
-                display::Fallback::VirtualDesktop => log_line(&format!(
-                    "display: using an isolated Wine desktop at {width}x{height}"
-                )),
-                display::Fallback::Portrait => {
-                    log_line("display fallback: the current monitor is portrait; playing windowed")
-                }
-                display::Fallback::UnsupportedMode => {
-                    log_line("display fallback: no such fullscreen mode; playing windowed")
-                }
-            }
+        match display_plan {
+            display::Plan::Fullscreen => {}
+            display::Plan::WineDesktop => log_line(&format!(
+                "display: using an isolated Wine desktop at {width}x{height}"
+            )),
+            display::Plan::WarnPortrait => log_line(
+                "warning: the current monitor is portrait; the game's fullscreen switch may fail",
+            ),
+            display::Plan::WarnUnsupportedMode => log_line(&format!(
+                "warning: the monitor has no {width}x{height} mode; the game's fullscreen switch may fail"
+            )),
         }
 
         // Aspect tables: patch every game exe in the runtime so the choice
@@ -415,12 +423,11 @@ mod app {
             }
         }
         log_line(&format!(
-            "configured: {}x{} {}, {}, fullscreen {}, vsync {}",
+            "configured: {}x{} {}, {}, vsync {}",
             picture.resolution.unwrap().0,
             picture.resolution.unwrap().1,
             aspect.key(),
             picture.quality.key(),
-            picture.fullscreen,
             picture.vsync,
         ));
 
@@ -437,7 +444,9 @@ mod app {
 
         configure_dxvk(&runtime_dir, linux)?;
         let dxvk_conf = runtime_dir.join("dxvk.conf");
-        if linux {
+        // Any DXVK reads dxvk.conf from the game folder: ours (srr-play,
+        // AppImage) or Proton's own when Steam starts the launcher directly.
+        if linux || wine {
             fs::write(
                 &dxvk_conf,
                 gamecfg::dxvk_conf(settings.effective_frame_limit().fps()),
@@ -475,7 +484,7 @@ mod app {
         }
 
         let runtime_exe = runtime_dir.join(launch_name);
-        let mut command = if matches!(fallback, Some(display::Fallback::VirtualDesktop)) {
+        let mut command = if display_plan == display::Plan::WineDesktop {
             let mut command = Command::new("explorer");
             command
                 .arg(format!("/desktop=SegaRally,{width}x{height}"))
