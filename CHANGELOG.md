@@ -30,11 +30,13 @@
   `--check` still runs alongside.
 - The DirectX 9 download shows its unpacking progress too (the SDK's
   downloader unpacks it now). The files now live in
-  `directx\directx_Jun2010_redist\` (unreleased builds used
-  `directx\d3dx9\`; that folder is no longer read and can be deleted).
+  `directx\directx_Jun2010_redist\`. **If you used an unreleased build and
+  downloaded them already, press Download again** (or run
+  `--download-directx`): the old `directx\d3dx9\` folder is no longer read
+  and can be deleted.
 - The old `aspect` and `fullscreen` settings are now ignored without
-  complaint, from `launcher.cfg` and on the command line (`--aspect` used
-  to be refused). Saving from the window turns those lines into comments.
+  complaint, from `launcher.cfg` and on the command line.
+  Saving from the window turns those lines into comments.
 - `--help` lists the switches in the same column as the options.
 - The Picture and Play tabs draw frame limit, language, quality and vsync
   with the SDK's option rows. Each description now sits under its row, and
@@ -102,9 +104,9 @@
   the resolution), and 21:9/32:9 only made sense with an ultra-wide
   resolution. Now an ultra-wide resolution gets the aspect fix by
   itself, and the Picture tab says what the game will run at. An old
-  `aspect = …` line is ignored silently; `--aspect` is refused with an
-  explanation. If you had forced 16:9 on an ultra-wide resolution, the
-  picture is now unstretched instead.
+  `aspect = …` line and `--aspect` are ignored (see "The old `aspect` and
+  `fullscreen` settings" above). If you had forced 16:9 on an ultra-wide
+  resolution, the picture is now unstretched instead.
 - **The Picture tab** is regrouped (Screen: resolution and what it means;
   Detail: quality and vsync), with a description under each control.
 - **Patches only go into identified executables.** The stutter fix and
