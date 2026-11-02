@@ -30,11 +30,12 @@ pub enum Outcome {
 pub fn show(settings_path: &Path, saved: Option<&str>, linux: bool) -> Result<Outcome, String> {
     let mut outcome = Outcome::Closed;
     let wine = win32::is_wine();
-    let zoom = if wine {
-        form::window_zoom(win32::screen_size(), 1.0)
-    } else {
-        1.0
-    };
+    // Under Wine the window is created at its final size (XWayland can
+    // lose a later resize). Wine then scales the window by its own DPI
+    // setting, so that is divided out; the DPI scale is read first, as it
+    // also makes the process DPI aware before the screen size is taken.
+    let native = if wine { win32::wine_dpi_scale() } else { 1.0 };
+    let zoom = form::creation_zoom(wine, win32::screen_size(), native);
     let size = SIZE * zoom;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

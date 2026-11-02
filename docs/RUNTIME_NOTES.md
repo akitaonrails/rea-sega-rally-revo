@@ -203,6 +203,11 @@ WINEPREFIX=~/.local/share/srr-launcher/prefix wine reg add \
   isolated desktop's explorer). Check in `launcher.log` and DXVK's log that
   DXVK 3.1.1 still loads and picks the dGPU through srr-play and the
   AppImage.
+- **Settings window at Wine DPI 120/144/192.** The creation zoom now
+  divides out Wine's DPI scale (`LOGPIXELSY`/96, process made DPI aware
+  first). Unit-tested only (fits 4K at 96–192 DPI); open the window with
+  `winecfg` DPI 144 and 192 on the 4K desktop and check it fits and is
+  sharp.
 - **Disabled chips** now outline the saved value and show a hover reason;
   not yet seen in the real window (capture the Play tab on native Windows
   or with a folder that lacks the clean SSE1 exe).

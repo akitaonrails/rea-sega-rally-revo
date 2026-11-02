@@ -86,6 +86,9 @@ WINEPREFIX=~/.local/share/srr-launcher/prefix wine reg add \
   pinned v3.1.1 commit and checked against its SHA-256, the DXVK folder is
   derived from `packaging/dxvk.txt` instead of hard-coded, and releases
   carry a `SHA256SUMS` file.
+- Under Wine with a raised DPI (`winecfg` 144 or 192) the settings window
+  came out 2.25× or 3× its size on a 4K screen, taller than the screen.
+  Wine's own DPI scale is now divided out of the window's starting zoom.
 - Disabled choice chips (stutter fix without the clean exe or before a
   folder is chosen, frame limit on native Windows) still outline the saved
   value and say why on hover.
