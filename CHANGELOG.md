@@ -30,6 +30,9 @@
   appended are removed. Comments, unknown keys, CRLF line endings, and the
   `[Audio]`/`[GameController]` sections are kept, and the file is replaced
   atomically (no half-written file after a crash).
+- The stutter fix checks its result against the known patched SHA-256
+  before writing the private exe, and refuses (writing nothing) on a
+  mismatch.
 
 ## v0.1.1 - 2026-11-02
 

@@ -299,7 +299,7 @@ mod app {
                 }
                 Ok(edition) if std::ptr::eq(edition, &edition::SSE1_CLEAN) => {
                     let _ = patches::aspect(&mut bytes, 16.0 / 9.0);
-                    match patches::pacer(&mut bytes) {
+                    match patches::pacer_verified(&mut bytes) {
                         Ok(true) => {
                             write_exe(&runtime_dir, edition::SSE1_EXE, &bytes)?;
                             pacer_done = true;

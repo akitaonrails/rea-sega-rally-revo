@@ -100,7 +100,11 @@ const MAIN_ORIGINAL: &[u8; 5] = &[0x8B, 0xF2, 0x3B, 0x35, 0x74];
 
 /// Sites written unconditionally to normalise earlier community
 /// experiments (the 0.96 clock scale, a resync test, a thread-priority
-/// test). All are no-ops on the clean base.
+/// test). All are no-ops on the clean base. These writes are deliberately
+/// not compared against expected original bytes (they exist to overwrite
+/// whatever an experiment left there); [`pacer_verified`] checks the whole
+/// result against the known patched SHA-256 instead, so an unexpected base
+/// is still refused before anything reaches disk.
 const NORMALISE: [(&[u8], usize, &str); 3] = [
     (&[0x40, 0x42, 0x0F, 0x00], 0x1898CE, "0.96 clock scale"),
     (
@@ -120,6 +124,8 @@ pub enum PatchError {
     CavesOverlap(u32, u32),
     SiteChanged(u32),
     Truncated,
+    /// The patched bytes do not hash to the known stutter-fixed build.
+    Unverified([u8; 32]),
 }
 
 impl std::fmt::Display for PatchError {
@@ -142,6 +148,12 @@ impl std::fmt::Display for PatchError {
                 write!(f, "unexpected byte change at {va:#x}; refusing to write")
             }
             PatchError::Truncated => write!(f, "the executable is truncated"),
+            PatchError::Unverified(digest) => write!(
+                f,
+                "the patched result (SHA-256 {}) is not the known stutter-fixed build; \
+                 nothing was written",
+                crate::edition::to_hex(digest)
+            ),
         }
     }
 }
@@ -321,6 +333,24 @@ pub fn pacer(data: &mut [u8]) -> Result<bool, PatchError> {
     Ok(true)
 }
 
+/// [`pacer`] on a copy, accepted only when the result is the known
+/// stutter-fixed build (judged with the aspect tables at 16:9, like every
+/// other identification). `data` is left untouched on any error, so the
+/// caller can never write an unverified executable.
+pub fn pacer_verified(data: &mut [u8]) -> Result<bool, PatchError> {
+    let mut patched = data.to_vec();
+    if !pacer(&mut patched)? {
+        return Ok(false);
+    }
+    match identify_ignoring_aspect(&patched) {
+        Ok(edition) if std::ptr::eq(edition, &crate::edition::SSE1_PACER) => {
+            data.copy_from_slice(&patched);
+            Ok(true)
+        }
+        _ => Err(PatchError::Unverified(crate::edition::sha256(&patched))),
+    }
+}
+
 /// The 16:9 aspect constant `39 8E E3 3F` (1.7777778f32) as it appears in
 /// the game's aspect tables, flanked by the 4:3 (`ab aa aa 3f`) and 16:10
 /// (`cd cc cc 3f`) constants. Patching the middle slot retargets the
@@ -489,6 +519,33 @@ mod tests {
     }
 
     #[test]
+    fn an_unverified_result_is_refused_and_nothing_changes() {
+        // A synthetic build passes every site check but is not the real
+        // exe, so the patched hash cannot match.
+        let mut data = vec![0u8; SSE1_SIZE];
+        for (bytes, offset) in [
+            (SPAWN_ORIGINAL as &[u8], file_offset(SPAWN_HOOK)),
+            (TICK_ORIGINAL, file_offset(TICK_HOOK)),
+            (MAIN_ORIGINAL, file_offset(MAIN_HOOK)),
+        ] {
+            data[offset..offset + bytes.len()].copy_from_slice(bytes);
+        }
+        let before = data.clone();
+        let mut expected = data.clone();
+        pacer(&mut expected).unwrap();
+        assert_eq!(
+            pacer_verified(&mut data),
+            Err(PatchError::Unverified(crate::edition::sha256(&expected)))
+        );
+        assert_eq!(data, before, "the input must stay untouched");
+        // Site errors still come through unchanged.
+        assert_eq!(
+            pacer_verified(&mut vec![0u8; 10]),
+            Err(PatchError::NotPatchable)
+        );
+    }
+
+    #[test]
     fn aspect_slots_follow_the_table_layouts() {
         let mut data = vec![0u8; 128];
         // table A: enum-style (4:3, 16:9, 16:10 back to back)
@@ -537,7 +594,7 @@ mod tests {
         };
         let path = std::path::Path::new(&dir).join(crate::edition::SSE1_EXE);
         let mut data = std::fs::read(&path).expect("read the SSE1 exe");
-        let applied = pacer(&mut data).expect("the clean build is patchable");
+        let applied = pacer_verified(&mut data).expect("the clean build patches to the known hash");
         println!("pacer applied: {applied}");
         let digest = crate::edition::sha256(&data);
         if applied {

@@ -175,3 +175,7 @@ was exercised against the real game yet:
   keys, and replaces the file by rename. Check that the game still reads
   the resolution/quality after a launch over a config.ini the game itself
   saved (CRLF), and that controller bindings survive.
+- **Pacer result verification.** The patch is now only written when it
+  hashes to `4c08c1de…f1ad08f2520`. Rerun `SRR_GAME_DIR=... cargo test
+  real_game -- --ignored` (it now goes through `pacer_verified`) and one
+  fresh-runtime launch with the stutter fix on.
