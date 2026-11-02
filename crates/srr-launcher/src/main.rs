@@ -572,6 +572,42 @@ mod app {
             log_line(&format!("wine: DLL overrides {overrides}"));
             command.env("WINEDLLOVERRIDES", overrides);
         }
+        // Wine ignores WINEDLLOVERRIDES in a child's environment block
+        // (SDK v0.3.3): the bundled DLLs go into the game's per-exe
+        // registry overrides; values the player set are kept.
+        if wine {
+            use rea_launcher_win32::wine::{self as winereg, DllMode};
+            let on: Vec<(&str, DllMode)> = plan
+                .app_dlls
+                .iter()
+                .map(|dll| (dll.as_str(), DllMode::NativeThenBuiltin))
+                .collect();
+            let off: Vec<(&str, DllMode)> = plan
+                .app_dlls_off
+                .iter()
+                .map(|dll| (dll.as_str(), DllMode::NativeThenBuiltin))
+                .collect();
+            match winereg::remove_app_dll_overrides(plan.launch, &off) {
+                Ok(removed) if !removed.is_empty() => log_line(&format!(
+                    "wine: per-exe DLL overrides removed for {}: {}",
+                    plan.launch,
+                    removed.join(",")
+                )),
+                Ok(_) => {}
+                Err(error) => log_line(&format!("warning: {error}")),
+            }
+            match winereg::app_dll_overrides(plan.launch, &on) {
+                Ok(applied) => {
+                    if !on.is_empty() {
+                        log_line(&format!(
+                            "wine: per-exe DLL overrides for {} (native,builtin): written {:?}, already ours {:?}, the player's kept {:?}",
+                            plan.launch, applied.written, applied.ours, applied.player
+                        ));
+                    }
+                }
+                Err(error) => log_line(&format!("warning: {error}")),
+            }
+        }
         let status = command
             .current_dir(&runtime_dir)
             .status()

@@ -58,6 +58,8 @@ command: ["C:\\Users\\José\\AppData\\Local\\SRRLauncher\\SegaRally\\SEGA Rally_
 display: Fullscreen
 resolution: 1280x720 (aspect native)
 WINEDLLOVERRIDES: None
+app DLL overrides (AppDefaults\<exe>\DllOverrides = native,builtin): []
+app DLL overrides taken back: []
 install DXVK d3d9.dll: false
 Windows GPU preference: true
 notes: []

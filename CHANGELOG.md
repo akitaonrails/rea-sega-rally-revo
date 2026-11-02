@@ -12,7 +12,14 @@
   the launcher wrote `Europe`, so `language = Polish` showed English menus
   (seen in the game). Choosing another language sets `Europe` again; with
   no language set, your own `sku` is kept.
-- Updated rea-launcher-sdk to v0.3.2.
+- Updated rea-launcher-sdk to v0.3.3.
+- **Bundled DLLs really load under Wine and Proton.** Wine ignores
+  `WINEDLLOVERRIDES` set for the game by the launcher, so DXVK's `d3d9.dll`
+  only loaded thanks to Wine's defaults and the downloaded DirectX 9 files
+  were never used. The launcher now writes them as per-game overrides in
+  the Wine registry (`AppDefaults\<game exe>\DllOverrides`, `native,builtin`);
+  a value you set there yourself is kept, and its own values are taken
+  back when the files go.
 - Options also take `--flag=value` (`--vsync=on`), and a flag spelled with
   an underscore works too (`--stutter_fix off`, `--frame_limit 60`), as
   the keys are spelled in `launcher.cfg`. Switches such as `--no-window`

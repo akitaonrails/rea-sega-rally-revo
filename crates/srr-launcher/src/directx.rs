@@ -188,6 +188,17 @@ pub fn override_names(dlls: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Every DLL name (lower case, no `.dll`) the DirectX download can put
+/// into the private copy: `d3dx9_24` … `d3dx9_43` and `d3dcompiler_33` …
+/// `d3dcompiler_43`. Used to take back registry overrides of files that
+/// are gone.
+pub fn all_override_names() -> Vec<String> {
+    (24..=43)
+        .map(|n| format!("d3dx9_{n}"))
+        .chain((33..=43).map(|n| format!("d3dcompiler_{n}")))
+        .collect()
+}
+
 /// What [`place`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Placed {

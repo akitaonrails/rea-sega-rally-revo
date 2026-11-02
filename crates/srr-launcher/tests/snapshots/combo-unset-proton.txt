@@ -42,6 +42,8 @@ command: ["explorer", "/desktop=SegaRally,1920x1080", "C:\\users\\steamuser\\App
 display: WineDesktop
 resolution: 1920x1080 (aspect native)
 WINEDLLOVERRIDES: None
+app DLL overrides (AppDefaults\<exe>\DllOverrides = native,builtin): []
+app DLL overrides taken back: [d3d9, d3dx9_24, d3dx9_25, d3dx9_26, d3dx9_27, d3dx9_28, d3dx9_29, d3dx9_30, d3dx9_31, d3dx9_32, d3dx9_33, d3dx9_34, d3dx9_35, d3dx9_36, d3dx9_37, d3dx9_38, d3dx9_39, d3dx9_40, d3dx9_41, d3dx9_42, d3dx9_43, d3dcompiler_33, d3dcompiler_34, d3dcompiler_35, d3dcompiler_36, d3dcompiler_37, d3dcompiler_38, d3dcompiler_39, d3dcompiler_40, d3dcompiler_41, d3dcompiler_42, d3dcompiler_43]
 install DXVK d3d9.dll: false
 Windows GPU preference: false
 notes: []

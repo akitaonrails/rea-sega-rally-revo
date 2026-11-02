@@ -90,6 +90,18 @@ fn render(
     )
     .unwrap();
     writeln!(w, "WINEDLLOVERRIDES: {:?}", plan.dll_overrides).unwrap();
+    writeln!(
+        w,
+        "app DLL overrides (AppDefaults\\<exe>\\DllOverrides = native,builtin): [{}]",
+        plan.app_dlls.join(", ")
+    )
+    .unwrap();
+    writeln!(
+        w,
+        "app DLL overrides taken back: [{}]",
+        plan.app_dlls_off.join(", ")
+    )
+    .unwrap();
     writeln!(w, "install DXVK d3d9.dll: {}", plan.install_dxvk).unwrap();
     writeln!(w, "Windows GPU preference: {}", plan.gpu_preference).unwrap();
     writeln!(w, "notes: {:#?}", plan.notes).unwrap();

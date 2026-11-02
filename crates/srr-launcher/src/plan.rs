@@ -55,8 +55,16 @@ pub struct Plan {
     pub dxvk_conf: Option<String>,
     /// Put the bundled DXVK `d3d9.dll` into the private copy.
     pub install_dxvk: bool,
-    /// `WINEDLLOVERRIDES` for the game, when it changes.
+    /// `WINEDLLOVERRIDES` for the game, when it changes (kept, but Wine
+    /// ignores it in a child's environment block: see `app_dlls`).
     pub dll_overrides: Option<String>,
+    /// Under Wine, the DLLs that get `native,builtin` in
+    /// `HKCU\Software\Wine\AppDefaults\<launch>\DllOverrides` (SDK
+    /// `app_dll_overrides`; values the player set are kept).
+    pub app_dlls: Vec<String>,
+    /// Under Wine, our earlier per-exe overrides to take back (components
+    /// off or files gone; SDK `remove_app_dll_overrides`).
+    pub app_dlls_off: Vec<String>,
     pub display: display::Plan,
     /// The program and its arguments.
     pub command: Vec<String>,
@@ -133,8 +141,22 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
     let registry = gamecfg::registry_values(&env.runtime, settings.language.as_deref());
     let dxvk = env.linux || env.wine;
     let dxvk_conf = dxvk.then(|| gamecfg::dxvk_conf(settings.effective_frame_limit().fps()));
+    let native = crate::directx::override_names(&env.directx);
+    let (app_dlls, app_dlls_off) = if env.wine {
+        let mut on: Vec<String> = Vec::new();
+        if env.linux {
+            on.push("d3d9".into());
+        }
+        on.extend(native.iter().cloned());
+        let off = std::iter::once("d3d9".to_string())
+            .chain(crate::directx::all_override_names())
+            .filter(|name| !on.contains(name))
+            .collect();
+        (on, off)
+    } else {
+        (Vec::new(), Vec::new())
+    };
     let dll_overrides = if dxvk {
-        let native = crate::directx::override_names(&env.directx);
         gamecfg::wine_overrides(env.dll_overrides.as_deref(), env.linux, &native)
     } else {
         None
@@ -167,6 +189,8 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
         dxvk_conf,
         install_dxvk: env.linux,
         dll_overrides,
+        app_dlls,
+        app_dlls_off,
         display,
         command,
         gpu_preference: !env.wine,
@@ -376,6 +400,38 @@ mod tests {
         let plan = super::plan(&Settings::default(), &RIP, &windows());
         assert_eq!(plan.dll_overrides, None);
         assert!(plan.gpu_preference);
+    }
+
+    #[test]
+    fn wine_gets_per_exe_dll_overrides_for_what_we_bundle() {
+        // SDK v0.3.3: Wine ignores WINEDLLOVERRIDES in the game's
+        // environment block, so the bundled DLLs go into the registry
+        // (AppDefaults\<exe>\DllOverrides, native,builtin).
+        let env = Env {
+            directx: vec!["d3dx9_35.dll".into(), "D3DCompiler_43.dll".into()],
+            ..linux()
+        };
+        let plan = plan(&Settings::default(), &RIP, &env);
+        assert_eq!(plan.app_dlls, ["d3d9", "d3dx9_35", "d3dcompiler_43"]);
+        // Everything else we could have written earlier is taken back
+        // (only values still equal to ours are removed).
+        assert!(plan.app_dlls_off.contains(&"d3dx9_24".to_string()));
+        assert!(plan.app_dlls_off.contains(&"d3dcompiler_42".to_string()));
+        assert!(!plan.app_dlls_off.contains(&"d3dx9_35".to_string()));
+        assert!(!plan.app_dlls_off.contains(&"d3d9".to_string()));
+        // Proton without --linux: no DXVK of ours, so d3d9 is taken back.
+        let proton = Env {
+            linux: false,
+            directx: vec![],
+            ..env
+        };
+        let plan = super::plan(&Settings::default(), &RIP, &proton);
+        assert!(plan.app_dlls.is_empty());
+        assert!(plan.app_dlls_off.contains(&"d3d9".to_string()));
+        assert!(plan.app_dlls_off.contains(&"d3dx9_35".to_string()));
+        // Native Windows: no registry overrides at all.
+        let plan = super::plan(&Settings::default(), &RIP, &windows());
+        assert!(plan.app_dlls.is_empty() && plan.app_dlls_off.is_empty());
     }
 
     #[test]
