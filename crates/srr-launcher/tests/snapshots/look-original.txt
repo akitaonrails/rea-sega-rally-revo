@@ -1,0 +1,108 @@
+# Original 2007, native Windows, over the player's config.ini
+
+## settings
+Settings {
+    game: Some(
+        "D:\\Games\\Sega Rally",
+    ),
+    runtime: None,
+    look: Some(
+        Original,
+    ),
+    resolution: Some(
+        Some(
+            (
+                1280,
+                720,
+            ),
+        ),
+    ),
+    quality: Some(
+        Normal,
+    ),
+    vsync: Some(
+        true,
+    ),
+    frame_limit: Some(
+        Fps60,
+    ),
+    stutter_fix: Some(
+        true,
+    ),
+    language: Some(
+        "English",
+    ),
+}
+
+## environment
+Env {
+    wine: false,
+    linux: false,
+    gamescope: false,
+    screen: Some(
+        (
+            2560,
+            1440,
+        ),
+    ),
+    mode_supported: true,
+    config_resolution: None,
+    dll_overrides: None,
+    directx: [],
+    runtime: "C:\\Users\\José\\AppData\\Local\\SRRLauncher\\SegaRally",
+}
+
+## launch
+executable: SEGA Rally_SSE1.exe
+command: ["C:\\Users\\José\\AppData\\Local\\SRRLauncher\\SegaRally\\SEGA Rally_SSE1.exe"]
+display: Fullscreen
+resolution: 1280x720 (aspect native)
+WINEDLLOVERRIDES: None
+install DXVK d3d9.dll: false
+Windows GPU preference: true
+notes: []
+
+## patches
+SEGA Rally.exe: pristine
+SEGA Rally_SSE1.exe: pacer
+  0x195660: E9 9B FA 0E 00  (pacer spawn: jmp to the spawn guard)
+  0x195323: E9 58 FE 0E 00 90 90  (race-clock tick: jmp to the master-clock tick)
+  0x158895: E9 66 C9 12 00  (main loop: jmp to the race-clock refresh)
+  0x285100: 83 3D A0 20 B4 00 00 75 0A 51 8D 04 24 50 E9 52 05 F1 FF C6 05 A4 20 B4 00 01 C6 05 A5 20 B4 00 00 B8 01 00 00 00 C3  (spawn guard: at most one pacer thread)
+  0x285180: 51 E8 0A 47 F0 FF 8B 15 2C 09 95 00 A1 28 09 95 00 6A 00 68 E8 03 00 00 52 50 E8 51 A7 E2 FF 3B 05 D8 70 96 00 76 0B A3 D8 70 96 00 89 15 DC 70 96 00 59 F8 E9 71 01 F1 FF  (race clock = master clock / 1000, never backwards)
+  0x285200: 3B 05 D8 70 96 00 76 0B A3 D8 70 96 00 89 15 DC 70 96 00 8B F2 3B 35 74 8C 72 00 8B F8 E9 7D 36 ED FF  (race clock refreshed every frame)
+
+## registry (HKLM\SOFTWARE\Sega\SEGA Rally, 32-bit view)
+installdir = "C:\\Users\\José\\AppData\\Local\\SRRLauncher\\SegaRally\\"
+sku = "Europe"
+language = "English"
+
+## dxvk.conf
+(not written)
+
+## config.ini (updated over the player's file)
+[Audio]\r
+DriverGUID=00000000-0000-0000-0000-000000000000\r
+Quality=2\r
+SoftwareEmulation=0\r
+\r
+[GameController]\r
+GUID={6F1D2B61-D5A0-11CF-BFC7-444553540000}\r
+Mapping=0001000100000001\r
+\r
+[Graphics]\r
+HorizontalResolution=1280\r
+VerticalResolution=720\r
+GraphicQuality=2\r
+VSync=1\r
+RunWindowed=0\r
+ShadowQuality=2\r
+ReflectionQuality=2\r
+TrackQuality=2\r
+TextureQuality=2\r
+ShaderQuality=2\r
+DrawDistanceQuality=2\r
+ParticleQuality=2\r
+RearViewMirrorQuality=2\r
+MudQuality=2\r
+

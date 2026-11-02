@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Golden snapshots (`crates/srr-launcher/tests/snapshots/`) of `--help`,
+  the `launcher.cfg` template, and what each look and three option
+  combinations write, so an SDK upgrade cannot change behaviour silently.
 - Docs: the README covers the v0.2 options (one table for window, file and
   command line), the DirectX 9 download instead of winetricks, an
   Uninstall section that says where saves live and to back them up first

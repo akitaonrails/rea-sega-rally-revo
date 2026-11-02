@@ -1,0 +1,49 @@
+# Sega Rally Revo launcher settings.
+# key = value; lines starting with # are comments. An unset key keeps the
+# game's own value (or the launcher's default where the game has none). The
+# settings window fills these in when you press Play.
+
+# The folder with SEGA Rally.exe or SEGA Rally_SSE1.exe. It is only read,
+# never changed.
+# Values: a folder or file.
+#game =
+
+# Where the launcher keeps its fixed-up copy of the game. Default:
+# %LOCALAPPDATA%\SRRLauncher\SegaRally.
+# Values: a folder or file.
+#runtime =
+
+# A ready-made picture: Modern (your screen, High), Steam Deck (1280x800,
+# High), Original 2007 (1280x720, Normal). On the command line it sets those
+# values for one run.
+# Values: modern, steam-deck, original or custom.
+#look =
+
+# The game's screen size; auto uses your screen. Ultra-wide sizes (21:9,
+# 32:9) get the aspect fix, so the picture is not stretched.
+# Values: WIDTHxHEIGHT or auto.
+#resolution = 3840x2160
+
+# The game's detail preset: Normal is the 2007 look, High sharper shadows
+# and track detail, Ultra every slider at maximum.
+# Values: normal, high or ultra.
+#quality =
+
+# Waits for the screen's refresh: no tearing. Off can tear on screens above
+# 60 Hz.
+# Values: on or off.
+#vsync =
+
+# The highest frame rate under Linux, Wine or Proton (through DXVK). 60 is
+# the steady default.
+# Values: 60, 120 or off.
+#frame_limit =
+
+# The community fix for the microstutter in every race and the judder from
+# Championship stage 2. Needs the clean SEGA Rally_SSE1.exe.
+# Values: on or off.
+#stutter_fix =
+
+# The language of the game's menus.
+# Values: English, French, German, Spanish, Italian or Polish.
+#language =

@@ -1,0 +1,122 @@
+# 21:9, Ultra, vsync off, 120 fps, stutter fix off, French, DirectX files
+
+## settings
+Settings {
+    game: Some(
+        "D:\\Jogos d'Ação\\Sega Rally",
+    ),
+    runtime: None,
+    look: None,
+    resolution: Some(
+        Some(
+            (
+                3440,
+                1440,
+            ),
+        ),
+    ),
+    quality: Some(
+        Ultra,
+    ),
+    vsync: Some(
+        false,
+    ),
+    frame_limit: Some(
+        Fps120,
+    ),
+    stutter_fix: Some(
+        false,
+    ),
+    language: Some(
+        "French",
+    ),
+}
+
+## environment
+Env {
+    wine: true,
+    linux: true,
+    gamescope: false,
+    screen: Some(
+        (
+            3440,
+            1440,
+        ),
+    ),
+    mode_supported: false,
+    config_resolution: None,
+    dll_overrides: Some(
+        "mscoree,mshtml=",
+    ),
+    directx: [
+        "D3DCompiler_43.dll",
+        "d3dx9_35.dll",
+    ],
+    runtime: "C:\\users\\steamuser\\AppData\\Local\\SRRLauncher\\SegaRally",
+}
+
+## launch
+executable: SEGA Rally.exe
+command: ["explorer", "/desktop=SegaRally,3440x1440", "C:\\users\\steamuser\\AppData\\Local\\SRRLauncher\\SegaRally\\SEGA Rally.exe"]
+display: WineDesktop
+resolution: 3440x1440 (aspect 21:9)
+WINEDLLOVERRIDES: Some("d3d9,d3dcompiler_43,d3dx9_35=n,b;mscoree,mshtml=")
+install DXVK d3d9.dll: true
+Windows GPU preference: false
+notes: [
+    "aspect: 3440x1440 is 21:9; aspect fix in the private copy",
+]
+
+## patches
+SEGA Rally.exe: aspect 21:9
+  0x2F4BF4: 26 B4 17 40  (aspect table 1: 16:9 slot)
+  0x2F7D68: 26 B4 17 40  (aspect table 2: 16:9 slot)
+SEGA Rally_SSE1.exe: aspect 21:9
+  0x2F7C44: 26 B4 17 40  (aspect table 1: 16:9 slot)
+  0x2FADA8: 26 B4 17 40  (aspect table 2: 16:9 slot)
+
+## registry (HKLM\SOFTWARE\Sega\SEGA Rally, 32-bit view)
+installdir = "C:\\users\\steamuser\\AppData\\Local\\SRRLauncher\\SegaRally\\"
+sku = "Europe"
+language = "French"
+
+## dxvk.conf
+d3d9.maxFrameRate = 120
+
+## config.ini (seeded)
+[Audio]
+DriverGUID=00000000-0000-0000-0000-000000000000
+Quality=3
+SoftwareEmulation=0
+
+[GameController]
+GUID=
+Mapping=000100010000000100000000-0000-0000-0000-0000000000000000000E000F001200130014000200030017001800010000
+
+[Graphics]
+AdapterOrdinal=0
+RenderDevice=Hardware
+AdapterFormat=X8R8G8B8
+HorizontalResolution=3440
+VerticalResolution=1440
+BackBufferFormat=A8R8G8B8
+DepthStencilFormat=D24S8
+AntiAliasingLevel=0
+MultisampleType=0
+MultisampleQuality=0
+GraphicQuality=3
+ShadowQuality=3
+ReflectionQuality=3
+TrackQuality=3
+TextureQuality=3
+ShaderQuality=3
+DrawDistanceQuality=3
+ParticleQuality=3
+RearViewMirrorQuality=3
+MudQuality=3
+VSync=0
+RefreshRate=60
+ShaderVersion=3
+ResolutionFilter=1
+RunWindowed=0
+
