@@ -37,8 +37,8 @@ jobs:
       - name: Dependency advisories, licenses, and sources
         run: cargo audit && cargo deny check
 
-      - name: Linux helper tests (GPU choice, game detection)
-        run: sh linux/tests/gpu-env.sh && sh linux/tests/game-alive.sh
+      - name: Linux helper tests (GPU choice, game detection, controller bridge)
+        run: sh linux/tests/gpu-env.sh && sh linux/tests/game-alive.sh && sh linux/tests/winebus.sh
 
       - name: Shell syntax
         run: sh -n linux/srr-play packaging/appimage/AppRun packaging/appimage/build.sh

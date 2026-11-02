@@ -77,7 +77,10 @@ From the `distrobox-gaming` install history (2026-05-01 through 2026-08-21):
 8. **Controller bridge.** The game needs Wine's SDL-backed XInput device:
    `Map Controllers=1` with raw evdev/hidraw duplicates disabled
    (`DisableHidraw=1`, `DisableInput=1`, `Enable SDL=1`). *Wired by:*
-   `srr-play` seeds the winebus key once per prefix. The pad must be in
+   `SRRLauncher.exe` seeds the absent winebus values under any Wine or
+   Proton, and `srr-play` seeds them before Wine boots on a new prefix.
+   (Before Unreleased, `srr-play` wrote `Disable Hidraw`/`Disable Input`
+   with a space, which Wine ignores.) The pad must be in
    X-input mode with a real `/dev/input/js*` device.
 9. **Force feedback crashes the game** (Steam community reports on
    Windows 10; the launcher's controller options "allow force feedback"

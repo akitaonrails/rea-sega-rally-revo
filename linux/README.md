@@ -5,7 +5,8 @@ game needs already wired:
 
 - a private Wine prefix (default `~/.local/share/srr-launcher/prefix`)
 - Wine's SDL controller bridge configured for this game (`Map Controllers=1`,
-  raw duplicate devices disabled), seeded once per prefix
+  `Enable SDL=1`, raw duplicates off with `DisableHidraw=1`/`DisableInput=1`),
+  seeded once per prefix before Wine starts; existing values are kept
 - optional `winetricks d3dx9 directplay d3dcompiler_47` when `winetricks`
   is installed — the offline DirectX runtime equivalents that stop this
   game's main-menu access violation (skip with `SRR_WINETRICKS=off`)
@@ -42,11 +43,12 @@ the window closes without Play, `srr-play` says so and starts nothing.
 
 State lives in `~/.config/srr-launcher` (`running.pid`, `play.log`,
 `settings.log`, `inner.sh`). Run `sh linux/tests/gpu-env.sh` and
-`sh linux/tests/game-alive.sh` to exercise the host-side helpers.
+`sh linux/tests/game-alive.sh` and `sh linux/tests/winebus.sh` to exercise the host-side helpers.
 
 ## Steam
 
 Add the AppImage as a non-Steam game: it runs this wrapper with everything
 above. Adding `SRRLauncher.exe` with a forced Proton version also works, but
-skips this wrapper: no controller-bridge seeding, no GPU pinning, no
-winetricks. The frame limit still applies through Proton's own DXVK.
+skips this wrapper: no GPU pinning, no winetricks. The launcher itself
+seeds the controller bridge into Proton's prefix (values that are already
+there are kept); it takes effect from the second start. The frame limit still applies through Proton's own DXVK.

@@ -146,3 +146,16 @@ Safari race driven with the 8BitDo pad in X-input mode through lap 2.
 This is the first recorded in-race gamepad control through the launcher
 (the game's native pad support, no remapping). The trimmed 1080p cut is
 linked from the README (hosted outside the repository).
+
+## Unreleased — cross-launcher audit fixes (needs a real-game check)
+
+Changed by code audit and covered by unit/shell tests only; none of this
+was exercised against the real game yet:
+
+- **winebus value names.** `DisableHidraw`/`DisableInput` are now really
+  set (the old spaced names were ignored by Wine, so the reference setup
+  ran with hidraw/evdev duplicates enabled and still worked). Check that
+  the 8BitDo pad still appears exactly once in the game's controller
+  options, that steering/buttons still work, and that the settings window's
+  pad navigation still works, both through `srr-play` and with Steam's
+  Proton running `SRRLauncher.exe` directly (second start).

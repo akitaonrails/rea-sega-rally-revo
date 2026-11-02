@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The controller bridge now actually disables Wine's raw hidraw/evdev
+  duplicates: `srr-play` wrote `Disable Hidraw`/`Disable Input` (with a
+  space), names Wine never reads. It now writes `DisableHidraw`/
+  `DisableInput`, only when absent, and `SRRLauncher.exe` seeds the same
+  values itself, so it also works when Proton runs the launcher directly.
+
 ## v0.1.1 - 2026-11-02
 
 Fixes from an audit of every option against its wiring, tests and docs:

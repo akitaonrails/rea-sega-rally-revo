@@ -6,7 +6,7 @@ use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_DWORD,
     REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey, RegCreateKeyExW, RegQueryValueExW,
     RegSetValueExW,
 };
@@ -224,6 +224,34 @@ fn write_named(key: &Key, name: &str, data: &str) -> Result<(), String> {
     } else {
         Err(format!("cannot write registry value (error {rc})"))
     }
+}
+
+fn write_dword(key: &Key, name: &str, value: u32) -> Result<(), String> {
+    let name = wide(name);
+    let data = value.to_le_bytes();
+    let rc = unsafe { RegSetValueExW(key.0, name.as_ptr(), 0, REG_DWORD, data.as_ptr(), 4) };
+    if rc == ERROR_SUCCESS {
+        Ok(())
+    } else {
+        Err(format!("cannot write registry value (error {rc})"))
+    }
+}
+
+/// Seed Wine's controller bridge for this game into whatever prefix the
+/// launcher runs in (srr-play, the AppImage, or Proton starting
+/// SRRLauncher.exe directly). Only absent values are written. Returns
+/// whether anything was written.
+pub fn wine_controller_baseline(key_path: &str, values: &[(&str, u32)]) -> Result<bool, String> {
+    let key = create_key(HKEY_LOCAL_MACHINE, key_path)
+        .map_err(|rc| format!("cannot open the Wine bus key (error {rc})"))?;
+    let mut wrote = false;
+    for (name, value) in values {
+        if !has_value(&key, name) {
+            write_dword(&key, name, *value)?;
+            wrote = true;
+        }
+    }
+    Ok(wrote)
 }
 
 /// Write the game's install registry values under

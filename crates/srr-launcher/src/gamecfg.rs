@@ -185,6 +185,22 @@ pub const BOOTUP_VIDEOS: [&str; 2] = [
 
 pub const DISABLED_SUFFIX: &str = ".srr-disabled";
 
+/// Wine's input bus key (`HKLM`), read by `winebus.sys` when the bus starts.
+pub const WINEBUS_KEY: &str = r"System\CurrentControlSet\Services\winebus";
+
+/// The controller bridge this game needs under Wine: Wine's SDL-backed
+/// XInput device (`Map Controllers=1`), with the raw hidraw/evdev duplicates
+/// kept out. The value names are exactly what `winebus.sys` reads —
+/// `DisableHidraw`/`DisableInput` without a space, `Enable SDL`/`Map
+/// Controllers` with one. Seeded only when absent, so a player's own value
+/// always wins.
+pub const WINEBUS_VALUES: [(&str, u32); 4] = [
+    ("DisableHidraw", 1),
+    ("DisableInput", 1),
+    ("Enable SDL", 1),
+    ("Map Controllers", 1),
+];
+
 /// DXVK-side frame limiter, the community-standard pacing guard for this
 /// game. `None` writes a neutral file.
 pub fn dxvk_conf(limit: Option<u32>) -> String {
@@ -300,6 +316,22 @@ mod tests {
         assert!(graphics.contains("AdapterOrdinal=0"));
         assert!(graphics.contains("MudQuality=2"));
         assert!(out.ends_with("RunWindowed=0\n"));
+    }
+
+    #[test]
+    fn winebus_value_names_are_the_ones_wine_reads() {
+        let names: Vec<&str> = WINEBUS_VALUES.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            names,
+            [
+                "DisableHidraw",
+                "DisableInput",
+                "Enable SDL",
+                "Map Controllers"
+            ]
+        );
+        assert!(WINEBUS_VALUES.iter().all(|(_, value)| *value == 1));
+        assert_eq!(WINEBUS_KEY, r"System\CurrentControlSet\Services\winebus");
     }
 
     #[test]

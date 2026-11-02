@@ -84,20 +84,27 @@ gpu_env() {
   fi
 }
 
-wine() { $RUN env WINEPREFIX="$PREFIX" ${GPU:+$GPU } wine "$@"; }
+# Wine in the private prefix (never shadows the wine command itself).
+prefix_wine() { $RUN env WINEPREFIX="$PREFIX" ${GPU:-} wine "$@"; }
 
 # Wine's input stack, tuned for this game (the reference setup): Wine's
 # SDL-backed XInput device is what the game sees, raw evdev/hidraw devices
-# are kept out of the way. Runs once per prefix.
+# are kept out of the way. The names are exactly what winebus.sys reads
+# (DisableHidraw/DisableInput, no space). SRRLauncher.exe seeds the same
+# values itself under any Wine/Proton; seeding here as well means the bus
+# already starts with them on a brand-new prefix. Only absent values are
+# written, then the prefix shuts down so the next start re-reads them.
+# Runs once per prefix (the v2 marker replaces the old, misspelled seed).
+WINEBUS='HKLM\System\CurrentControlSet\Services\winebus'
 seed_winebus() {
-  [ -f "$PREFIX/.srr-winebus" ] && return 0
+  [ -f "$PREFIX/.srr-winebus-v2" ] && return 0
   echo "configuring Wine's controller bridge (once)"
-  reg() { wine reg add "HKLM\\System\\CurrentControlSet\\Services\\winebus" /v "$1" /t REG_DWORD /d "$2" /f >/dev/null 2>&1; }
-  reg "Disable Hidraw" 1
-  reg "Disable Input" 1
-  reg "Enable SDL" 1
-  reg "Map Controllers" 1
-  : > "$PREFIX/.srr-winebus"
+  for name in DisableHidraw DisableInput "Enable SDL" "Map Controllers"; do
+    prefix_wine reg query "$WINEBUS" /v "$name" >/dev/null 2>&1 ||
+      prefix_wine reg add "$WINEBUS" /v "$name" /t REG_DWORD /d 1 /f >/dev/null 2>&1
+  done
+  $RUN env WINEPREFIX="$PREFIX" wineserver -w 2>/dev/null
+  : > "$PREFIX/.srr-winebus-v2"
 }
 
 # The offline DirectX runtime equivalents: the community setup installs

@@ -167,6 +167,17 @@ mod app {
                 cli.join(" ")
             ));
         }
+        // Before any window or game: the settings window's pad navigation
+        // and the game both read XInput through Wine's bus.
+        if win32::is_wine() {
+            match win32::wine_controller_baseline(gamecfg::WINEBUS_KEY, &gamecfg::WINEBUS_VALUES) {
+                Ok(true) => log_line(
+                    "wine: controller bridge seeded (winebus: SDL mapped, hidraw/evdev off)",
+                ),
+                Ok(false) => {}
+                Err(error) => log_line(&format!("warning: {error}")),
+            }
+        }
         if settings_only || (cli.is_empty() && !no_window && !check_only && !setup_only) {
             if win32::is_wine() {
                 match win32::prefer_gpu_opengl() {
