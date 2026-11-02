@@ -436,7 +436,7 @@ mod tests {
                     .any(|v| v.name == "language" && v.value == "German" && !v.if_missing)
             }),
         ];
-        for option in crate::config::OPTIONS {
+        for option in rea_launcher::cfg::spec::active(crate::config::OPTIONS) {
             assert!(
                 cases.iter().any(|(key, _, _)| *key == option.key),
                 "no end-to-end case for {}",

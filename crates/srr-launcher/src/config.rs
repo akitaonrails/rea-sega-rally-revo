@@ -262,24 +262,52 @@ pub const OPTIONS: &[OptionSpec] = &[
         "Language",
         "The language of the game's menus.",
     ),
+    // Keys of earlier releases that no longer do anything: read and
+    // ignored silently (file and flag), commented out when the window
+    // saves.
+    OptionSpec::removed(
+        "aspect",
+        "the aspect follows the resolution (ultra-wide sizes get the aspect fix)",
+    ),
+    OptionSpec::removed("fullscreen", "the game always runs full screen (v0.1.0)"),
 ];
 
-/// Keys of earlier releases that no longer do anything; an old
-/// `launcher.cfg` that still has them is read without a warning, and the
-/// lines are left in the file. `aspect` now follows the resolution;
-/// `fullscreen` went in v0.1.0.
-pub const RETIRED_KEYS: [&str; 2] = ["aspect", "fullscreen"];
+/// The launcher's value-less switches and their `--help` lines.
+pub const SWITCH_HELP: [(&str, &str); 7] = [
+    (
+        "--check",
+        "check the game folder and exit (exit code 1 if it cannot play)",
+    ),
+    (
+        "--setup",
+        "prepare the private copy and the game's settings, without playing",
+    ),
+    (
+        "--download-directx",
+        "download Microsoft's DirectX 9 files into the private copy, then exit",
+    ),
+    (
+        "--no-window",
+        "play with the saved settings, no launcher window",
+    ),
+    ("--settings", "only show the settings window"),
+    (
+        "--linux",
+        "running under srr-play or the AppImage: install DXVK into the copy",
+    ),
+    ("--help", "show this help"),
+];
 
 /// The launcher's value-less switches.
-pub const SWITCHES: [&str; 7] = [
-    "--check",
-    "--setup",
-    "--no-window",
-    "--settings",
-    "--linux",
-    "--download-directx",
-    "--help",
-];
+pub const SWITCHES: [&str; 7] = {
+    let mut flags = [""; 7];
+    let mut i = 0;
+    while i < flags.len() {
+        flags[i] = SWITCH_HELP[i].0;
+        i += 1;
+    }
+    flags
+};
 
 /// The option row for `key`.
 pub fn option(key: &str) -> &'static OptionSpec {
@@ -301,20 +329,15 @@ pub fn template() -> String {
 
 /// `--help`: the options from the table, then the switches.
 pub fn usage() -> String {
-    const SWITCH_LINES: &str = concat!(
-        "  --check             check the game folder and exit (exit code 1 if it cannot play)\n",
-        "  --setup             prepare the private copy and the game's settings, without playing\n",
-        "  --download-directx  download Microsoft's DirectX 9 files into the private copy, then exit\n",
-        "  --no-window         play with the saved settings, no launcher window\n",
-        "  --settings          only show the settings window\n",
-        "  --linux             running under srr-play or the AppImage: install DXVK into the copy\n",
-        "  --help              show this help\n",
-    );
     format!(
-        "SRRLauncher {}\n\nSRRLauncher [options]\n\n{}{SWITCH_LINES}\n\
+        "SRRLauncher {}\n\nSRRLauncher [options]\n\n{}{}\n\
          Options override launcher.cfg for one run; only --game is remembered.\n",
         env!("CARGO_PKG_VERSION"),
-        spec::usage(OPTIONS, KeyStyle::Underscore)
+        spec::usage(OPTIONS, KeyStyle::Underscore),
+        SWITCH_HELP
+            .iter()
+            .map(|(flag, text)| format!("  {flag:18}  {text}\n"))
+            .collect::<String>()
     )
 }
 
@@ -322,11 +345,6 @@ pub fn usage() -> String {
 fn arg_message(error: ArgError) -> String {
     match error {
         ArgError::Help(_) => usage(),
-        ArgError::Unknown(flag) if flag == "--aspect" => format!(
-            "--aspect was removed: the aspect now follows the resolution \
-             (ultra-wide sizes get the aspect fix).\n\n{}",
-            usage()
-        ),
         ArgError::Unknown(flag) => format!("unknown option {flag}\n\n{}", usage()),
         ArgError::MissingValue(flag) => format!("{flag} needs a value\n\n{}", usage()),
         ArgError::Bad { flag, value, needs } => {
@@ -389,16 +407,11 @@ impl Settings {
     }
 
     /// The settings in a `launcher.cfg` text and a warning per bad line.
-    /// Retired keys ([`RETIRED_KEYS`]) are skipped without a warning.
+    /// Removed keys (`aspect`, `fullscreen`) are skipped without a warning.
     pub fn parse_file(text: &str) -> (Settings, Vec<String>) {
         let mut settings = Settings::default();
-        let warnings = cfg::parse(text, FILE_NAME, |key, value| {
-            if RETIRED_KEYS.contains(&key) {
-                return Ok(());
-            }
-            spec::dispatch(OPTIONS, key, value, &mut |key, value| {
-                settings.apply(key, value)
-            })
+        let warnings = spec::parse_file(text, FILE_NAME, OPTIONS, |key, value| {
+            settings.apply(key, value)
         });
         (settings, warnings)
     }
@@ -577,11 +590,9 @@ mod tests {
             &["--language", "Klingon"],
             &["--vsync", "maybe"],
             &["--stutter-fix", "sometimes"],
-            &["--aspect", "21:9"],
             &["--quality", "insane"],
             &["--resolution", "100x100"],
             &["--look", "fancy"],
-            &["--fullscreen", "off"],
             &["--bogus"],
             &["--game"],
         ] {
@@ -616,7 +627,6 @@ mod tests {
         assert!(error(&["--language", "Klingon"]).starts_with(
             "--language needs English, French, German, Spanish, Italian or Polish, not"
         ));
-        assert!(error(&["--aspect", "21:9"]).starts_with("--aspect was removed"));
         for help in ["--help", "-h", "/?"] {
             assert_eq!(error(&[help]), usage);
         }
@@ -672,8 +682,14 @@ mod tests {
         assert!(warnings.is_empty());
         assert_eq!(reread.frame_limit, Some(FrameLimit::Fps60));
         assert_eq!(reread.stutter_fix, Some(true));
-        // The retired aspect line stays, untouched and ignored.
-        assert!(saved.contains("aspect = 16:9\n"));
+        // The removed flags are accepted and ignored.
+        let cli = args(&["--aspect", "21:9", "--fullscreen", "off"]).unwrap();
+        assert!(!cli.options_given());
+        // Saving comments the removed lines out.
+        let retired = spec::retire_removed(&saved, OPTIONS);
+        assert!(!retired.contains("\naspect = ") && !retired.contains("\nfullscreen = "));
+        assert!(retired.contains("\n#aspect =\n") && retired.contains("\n#fullscreen =\n"));
+        assert_eq!(Settings::parse_file(&retired).0, reread);
     }
 
     #[test]
@@ -682,7 +698,7 @@ mod tests {
         let (settings, warnings) = Settings::parse_file(&template);
         assert!(warnings.is_empty());
         assert_eq!(settings, Settings::default());
-        for option in OPTIONS {
+        for option in spec::active(OPTIONS) {
             assert!(
                 template.contains(&format!("#{} =", option.key)),
                 "{}",
@@ -698,9 +714,11 @@ mod tests {
     #[test]
     fn help_lists_every_flag() {
         let usage = usage();
-        for option in OPTIONS {
+        for option in spec::active(OPTIONS) {
             assert!(usage.contains(&option.flag_name(KeyStyle::Underscore)));
         }
+        assert!(!usage.contains("--aspect") && !usage.contains("--fullscreen"));
+        assert!(!template().contains("aspect =") && !template().contains("fullscreen"));
         for switch in SWITCHES {
             assert!(usage.contains(switch), "{switch}");
         }

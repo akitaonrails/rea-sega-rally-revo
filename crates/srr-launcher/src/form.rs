@@ -1,7 +1,7 @@
 //! The settings window's state, independent of egui: what each control
 //! holds, the looks, and how it is saved to `launcher.cfg`.
 
-use rea_launcher::cfg;
+use rea_launcher::cfg::{self, spec};
 pub use rea_launcher::display::STEAM_DECK_SCREEN;
 
 pub use crate::config::Look;
@@ -154,9 +154,10 @@ impl Form {
             ("stutter_fix", cfg::on_off(self.stutter_fix).to_string()),
             ("language", self.language.clone()),
         ];
-        values.iter().fold(text.to_string(), |out, (key, value)| {
-            config::set_key(&out, key, value)
-        })
+        let text = spec::retire_removed(text, config::OPTIONS);
+        values
+            .iter()
+            .fold(text, |out, (key, value)| config::set_key(&out, key, value))
     }
 }
 
