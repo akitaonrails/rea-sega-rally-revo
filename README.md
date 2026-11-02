@@ -223,7 +223,7 @@ cargo test --workspace                                 # host tests
 for t in linux/tests/*.sh; do sh "$t"; done            # Linux helper tests
 cargo clippy --release --target i686-pc-windows-gnu -- -D warnings
 cargo build --release --target i686-pc-windows-gnu     # needs i686 mingw-w64 and lld
-packaging/appimage/build.sh <package-folder> <output-folder>
+sh packaging/package.sh <version> dist target/i686-pc-windows-gnu/release   # zip + AppImage
 ```
 
 CI (`.github/workflows/build.yml`) runs all of this on every push, checks

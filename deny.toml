@@ -1,3 +1,6 @@
+# cargo-deny for a rea launcher (copy to the launcher's root as deny.toml).
+# launcher-ci.yml runs `cargo deny check` against it when `audit` is on.
+
 [advisories]
 
 [licenses]
@@ -20,3 +23,5 @@ allow = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# The SDK crates come from this repository, pinned to a tag in Cargo.toml.
+allow-git = ["https://github.com/akitaonrails/rea-launcher-sdk"]

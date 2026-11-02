@@ -1,0 +1,13 @@
+# Everything SRRLauncher-<version>/ (the zip) may hold; anything else fails
+# sdk/packaging/smoke-package.sh. Never game files.
+SRRLauncher.exe
+README.md
+THIRD_PARTY.md
+LICENSE-MIT
+LICENSE-APACHE
+linux/srr-play x
+linux/rea-play.sh
+linux/README.md
+linux/tests/*.sh
+linux/d3d9.dll
+linux/dxvk-LICENSE

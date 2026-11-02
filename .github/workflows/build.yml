@@ -7,118 +7,47 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 permissions:
   contents: read
 
 jobs:
-  windows-binaries:
-    name: Test and build the Windows and Linux packages
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install the 32-bit MinGW toolchain and LLD
-        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-i686 lld zip
-
-      - name: Install Rust (with the 32-bit Windows target)
-        run: |
-          rustup toolchain install stable --profile minimal --component clippy,rustfmt
-          rustup target add i686-pc-windows-gnu
-
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Unit tests (host)
-        run: cargo test --workspace --locked
-
-      - name: Install dependency audit tools
-        run: cargo install --locked cargo-audit cargo-deny
-
-      - name: Dependency advisories, licenses, and sources
-        run: cargo audit && cargo deny check
-
-      - name: Linux helper tests (GPU choice, game detection, controller bridge, supervision)
-        run: |
-          sh linux/tests/gpu-env.sh
-          sh linux/tests/game-alive.sh
-          sh linux/tests/winebus.sh
-          sh linux/tests/supervision.sh
-          sh linux/tests/layout.sh
-
-      - name: Shell syntax
-        run: sh -n linux/srr-play sdk/rea-play.sh packaging/appimage/AppRun packaging/appimage/build.sh
-
-      - name: Lint (Windows target)
-        run: cargo clippy --release --target i686-pc-windows-gnu --workspace --locked -- -D warnings
-
-      - name: Build SRRLauncher.exe
-        run: cargo build --release --target i686-pc-windows-gnu --workspace --locked
-
-      - name: Every import of SRRLauncher.exe is resolvable
-        run: SRR_LAUNCHER_EXE="$PWD/target/i686-pc-windows-gnu/release/SRRLauncher.exe" cargo test --locked --test imports -- --ignored
-
-      - name: Package (including pinned DXVK)
-        run: |
-          name=SRRLauncher-${GITHUB_REF_NAME//\//-}
-          mkdir -p "dist/$name"
-          cp target/i686-pc-windows-gnu/release/SRRLauncher.exe \
-             README.md THIRD_PARTY.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
-          cp -r linux "dist/$name/linux"
-          cp sdk/rea-play.sh "dist/$name/linux/rea-play.sh"
-          { read -r url digest; read -r licence_url licence_digest; } < <(grep -v '^#' packaging/dxvk.txt)
-          curl -fsSL "$url" -o dxvk.tar.gz
-          echo "$digest  dxvk.tar.gz" | sha256sum -c -
-          top=$(basename "$url" .tar.gz)
-          tar -xOf dxvk.tar.gz "$top/x32/d3d9.dll" > "dist/$name/linux/d3d9.dll"
-          curl -fsSL "$licence_url" -o "dist/$name/linux/dxvk-LICENSE"
-          echo "$licence_digest  dist/$name/linux/dxvk-LICENSE" | sha256sum -c -
-          chmod +x "dist/$name/linux/srr-play"
-          (cd dist && zip -r "$name.zip" "$name")
-          echo "PACKAGE=dist/$name.zip" >> "$GITHUB_ENV"
-          echo "PACKAGE_DIR=dist/$name" >> "$GITHUB_ENV"
-          echo "APPIMAGE=dist/$name-x86_64.AppImage" >> "$GITHUB_ENV"
-
-      - name: Build the Linux AppImage (with portable Wine)
-        run: |
-          packaging/appimage/build.sh "$PACKAGE_DIR" dist/appimage
-          mv dist/appimage/SRRLauncher-x86_64.AppImage "$APPIMAGE"
-
-      - name: Check the AppImage DXVK layout
-        run: |
-          "$APPIMAGE" --appimage-extract >/dev/null
-          test -f squashfs-root/usr/lib/srr/linux/d3d9.dll
-          rm -rf squashfs-root
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: SRRLauncher-windows
-          path: ${{ env.PACKAGE }}
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: SRRLauncher-linux
-          path: ${{ env.APPIMAGE }}
+  # The shared rea-launcher-sdk CI: formatting, host tests, cargo audit and
+  # deny, sdk/ drift, shell syntax and the Linux helper tests, Windows-target
+  # clippy, the release build, the import-resolution test, packaging and the
+  # package allowlist.
+  ci:
+    uses: akitaonrails/rea-launcher-sdk/.github/workflows/launcher-ci.yml@v0.1.0
+    with:
+      apt-packages: gcc-mingw-w64-i686 lld zip unzip
+      clippy-args: ""
+      shell-tests: linux/tests/*.sh packaging/tests/*.sh
+      imports-test: SRR_LAUNCHER_EXE="$REA_RELEASE_DIR/SRRLauncher.exe" cargo test --locked --test imports -- --ignored
+      package-command: |
+        sh packaging/package.sh "$REA_VERSION_NAME" dist "$REA_RELEASE_DIR"
+        # The AppImage carries DXVK where SRRLauncher.exe looks for it.
+        appimage="$PWD/dist/SRRLauncher-$REA_VERSION_NAME-x86_64.AppImage"
+        (cd "$RUNNER_TEMP" && "$appimage" --appimage-extract >/dev/null &&
+          test -f squashfs-root/usr/lib/srr/linux/d3d9.dll &&
+          test -f squashfs-root/usr/lib/srr/rea-play.sh && rm -rf squashfs-root)
+      package-dir: dist/SRRLauncher-*.zip
+      package-allowlist: packaging/package.allow
+      artifact-name: SRRLauncher-packages
+      artifact-paths: |
+        dist/*.zip
+        dist/*.AppImage
 
   release:
-    name: Publish a release for version tags
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: windows-binaries
-    runs-on: ubuntu-24.04
+    needs: ci
     permissions:
       contents: write
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: SRRLauncher-*
-          merge-multiple: true
-      - name: Create checksums
-        run: sha256sum ./*.zip ./*.AppImage | sed 's| \./| |' > SHA256SUMS
-
-      - name: Create the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          awk 'BEGIN { take = 0 } /^## v/ { if (take) exit; take = 1; next } take { print }' CHANGELOG.md > release-notes.md
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-file release-notes.md ./*.zip ./*.AppImage SHA256SUMS
+      id-token: write
+      attestations: write
+    uses: akitaonrails/rea-launcher-sdk/.github/workflows/launcher-release.yml@v0.1.0
+    with:
+      package: srr-launcher
+      artifact-pattern: SRRLauncher-*
