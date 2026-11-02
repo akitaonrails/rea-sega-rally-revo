@@ -14,17 +14,20 @@
 //!
 //! The user's source folder is never written; patches are only ever applied
 //! to the runtime copy, and every write is checked against the expected
-//! original bytes first.
+//! original bytes first. The checks themselves (expected-or-patched sites,
+//! zero-filled caves, the result's SHA-256) are the SDK's `patch` module.
+
+use rea_launcher::patch::{self, Site};
 
 /// A tiny x86 assembler for literal opcodes plus computed rel32 branches.
-struct Cave {
+struct Asm {
     base: u32,
     bytes: Vec<u8>,
 }
 
-impl Cave {
-    fn new(base: u32) -> Cave {
-        Cave {
+impl Asm {
+    fn new(base: u32) -> Asm {
+        Asm {
             base,
             bytes: Vec::new(),
         }
@@ -34,13 +37,13 @@ impl Cave {
         self.base + self.bytes.len() as u32
     }
 
-    fn raw(&mut self, bytes: &[u8]) -> &mut Cave {
+    fn raw(&mut self, bytes: &[u8]) -> &mut Asm {
         self.bytes.extend_from_slice(bytes);
         self
     }
 
     /// `E8` (call) / `E9` (jmp) to an absolute VA.
-    fn rel32(&mut self, opcode: u8, target: u32) -> &mut Cave {
+    fn rel32(&mut self, opcode: u8, target: u32) -> &mut Asm {
         self.raw(&[opcode]);
         let end = self.va() + 4;
         self.bytes.extend_from_slice(
@@ -52,7 +55,7 @@ impl Cave {
     }
 
     /// Short conditional branch over an already-assembled block.
-    fn branch_over(&mut self, opcode: u8, block: &[u8]) -> &mut Cave {
+    fn branch_over(&mut self, opcode: u8, block: &[u8]) -> &mut Asm {
         assert!(block.len() < 128);
         self.raw(&[opcode, block.len() as u8]);
         self.bytes.extend_from_slice(block);
@@ -115,17 +118,19 @@ const NORMALISE: [(&[u8], usize, &str); 3] = [
     (&[0x01], 0x1723EE, "engine thread priority"),
 ];
 
+/// Why a patch was refused. Nothing was written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PatchError {
+    /// Not the size of the clean SSE1 build.
     NotPatchable,
-    NotClean(&'static str),
-    CaveNotZero(u32),
-    CaveTooLarge(u32),
-    CavesOverlap(u32, u32),
-    SiteChanged(u32),
-    Truncated,
-    /// The patched bytes do not hash to the known stutter-fixed build.
-    Unverified([u8; 32]),
+    /// A site, cave or result check failed (the SDK's checks).
+    Check(patch::PatchError),
+}
+
+impl From<patch::PatchError> for PatchError {
+    fn from(error: patch::PatchError) -> PatchError {
+        PatchError::Check(error)
+    }
 }
 
 impl std::fmt::Display for PatchError {
@@ -134,26 +139,7 @@ impl std::fmt::Display for PatchError {
             PatchError::NotPatchable => {
                 write!(f, "this executable is not the supported SSE1 build")
             }
-            PatchError::NotClean(what) => {
-                write!(f, "patch site for {what} does not match the clean build")
-            }
-            PatchError::CaveNotZero(va) => {
-                write!(f, "cave space at {va:#x} is not zero-filled")
-            }
-            PatchError::CaveTooLarge(va) => write!(f, "cave at {va:#x} runs past .text"),
-            PatchError::CavesOverlap(a, b) => {
-                write!(f, "caves at {a:#x} and {b:#x} overlap")
-            }
-            PatchError::SiteChanged(va) => {
-                write!(f, "unexpected byte change at {va:#x}; refusing to write")
-            }
-            PatchError::Truncated => write!(f, "the executable is truncated"),
-            PatchError::Unverified(digest) => write!(
-                f,
-                "the patched result (SHA-256 {}) is not the known stutter-fixed build; \
-                 nothing was written",
-                crate::edition::to_hex(digest)
-            ),
+            PatchError::Check(error) => error.fmt(f),
         }
     }
 }
@@ -163,11 +149,11 @@ fn file_offset(va: u32) -> usize {
 }
 
 fn spawn_guard_cave() -> Vec<u8> {
-    let mut cave = Cave::new(CAVE1);
+    let mut cave = Asm::new(CAVE1);
     cave.raw(&[0x83, 0x3D])
         .raw(&le32(PACER_HANDLE))
         .raw(&[0x00]);
-    let mut prologue = Cave::new(cave.va() + 2);
+    let mut prologue = Asm::new(cave.va() + 2);
     prologue.raw(&[0x51, 0x8D, 0x04, 0x24, 0x50]);
     prologue.rel32(0xE9, SPAWN_RESUME);
     let prologue = std::mem::take(&mut prologue.bytes);
@@ -186,7 +172,7 @@ fn race_clock_cave() -> Vec<u8> {
         &le32(RACE_MS_H)[..],
     ]
     .concat();
-    let mut cave = Cave::new(CAVE2);
+    let mut cave = Asm::new(CAVE2);
     cave.raw(&[0x51]);
     cave.rel32(0xE8, CLOCK_TICK);
     cave.raw(&[0x8B, 0x15]).raw(&le32(TOTAL_USEC_H));
@@ -211,7 +197,7 @@ fn main_loop_cave() -> Vec<u8> {
         &le32(RACE_MS_H)[..],
     ]
     .concat();
-    let mut cave = Cave::new(CAVE3);
+    let mut cave = Asm::new(CAVE3);
     cave.raw(&[0x3B, 0x05]).raw(&le32(RACE_MS_L));
     cave.branch_over(0x76, &store);
     cave.raw(&[0x8B, 0xF2]);
@@ -222,27 +208,24 @@ fn main_loop_cave() -> Vec<u8> {
 }
 
 fn hook_bytes(hook: u32, target: u32, pad: usize) -> Vec<u8> {
-    let mut cave = Cave::new(hook);
+    let mut cave = Asm::new(hook);
     cave.rel32(0xE9, target);
     let mut bytes = cave.bytes;
     bytes.resize(bytes.len() + pad, 0x90);
     bytes
 }
 
-fn caves() -> [(u32, Vec<u8>); 3] {
+fn caves() -> [(u32, Vec<u8>, &'static str); 3] {
     [
-        (CAVE1, spawn_guard_cave()),
-        (CAVE2, race_clock_cave()),
-        (CAVE3, main_loop_cave()),
+        (CAVE1, spawn_guard_cave(), "spawn-guard cave"),
+        (CAVE2, race_clock_cave(), "raceclock cave"),
+        (CAVE3, main_loop_cave(), "mainloop cave"),
     ]
 }
 
-fn read(data: &[u8], offset: usize, len: usize) -> Result<&[u8], PatchError> {
-    data.get(offset..offset + len).ok_or(PatchError::Truncated)
-}
-
 /// Apply the community pacer fix in place. Returns `Ok(true)` when bytes
-/// were written, `Ok(false)` when the fix is already present.
+/// were written, `Ok(false)` when the fix is already present. Every check
+/// runs before the first write.
 pub fn pacer(data: &mut [u8]) -> Result<bool, PatchError> {
     if data.len() != SSE1_SIZE {
         return Err(PatchError::NotPatchable);
@@ -250,86 +233,60 @@ pub fn pacer(data: &mut [u8]) -> Result<bool, PatchError> {
     let spawn_hook = hook_bytes(SPAWN_HOOK, CAVE1, 0);
     let tick_hook = hook_bytes(TICK_HOOK, CAVE2, 2);
     let main_hook = hook_bytes(MAIN_HOOK, CAVE3, 0);
-    if read(data, file_offset(SPAWN_HOOK), spawn_hook.len())? == spawn_hook.as_slice() {
+    let spawn_at = file_offset(SPAWN_HOOK);
+    if data.get(spawn_at..spawn_at + spawn_hook.len()) == Some(&spawn_hook[..]) {
         return Ok(false); // already patched
     }
 
-    // Static checks, before anything is written.
-    let mut spans = Vec::new();
-    for (base, bytes) in caves() {
-        let start = file_offset(base);
-        let end = start + bytes.len();
-        if end > TEXT_RAW_END {
-            return Err(PatchError::CaveTooLarge(base));
-        }
-        if read(data, start, bytes.len())?.iter().any(|b| *b != 0) {
-            return Err(PatchError::CaveNotZero(base));
-        }
-        spans.push((start, end, base));
-    }
-    spans.sort_unstable();
-    for (a, b) in spans.iter().zip(spans.iter().skip(1)) {
-        if a.1 > b.0 {
-            return Err(PatchError::CavesOverlap(a.2, b.2));
-        }
-    }
-    for (original, offset, what) in [
-        (
-            SPAWN_ORIGINAL as &[u8],
-            file_offset(SPAWN_HOOK),
-            "pacer spawn",
-        ),
-        (TICK_ORIGINAL, file_offset(TICK_HOOK), "race-clock tick"),
-        (MAIN_ORIGINAL, file_offset(MAIN_HOOK), "main-loop refresh"),
-    ] {
-        if read(data, offset, original.len())? != original {
-            return Err(PatchError::NotClean(what));
-        }
-    }
-
-    // Writes: normalise first (no-ops on a clean base), then the fix.
-    let writes: Vec<(usize, Vec<u8>, String)> = NORMALISE
+    let caves = caves();
+    let spans: Vec<patch::Cave> = caves
         .iter()
-        .map(|(bytes, offset, what)| (*offset, (*bytes).to_vec(), (*what).to_string()))
-        .chain([
-            (
-                file_offset(SPAWN_HOOK),
-                spawn_hook,
-                "spawn-guard hook".to_string(),
-            ),
-            (
-                file_offset(CAVE1),
-                caves()[0].1.clone(),
-                "spawn-guard cave".to_string(),
-            ),
-            (
-                file_offset(TICK_HOOK),
-                tick_hook,
-                "raceclock hook".to_string(),
-            ),
-            (
-                file_offset(CAVE2),
-                caves()[1].1.clone(),
-                "raceclock cave".to_string(),
-            ),
-            (
-                file_offset(MAIN_HOOK),
-                main_hook,
-                "mainloop hook".to_string(),
-            ),
-            (
-                file_offset(CAVE3),
-                caves()[2].1.clone(),
-                "mainloop cave".to_string(),
-            ),
-        ])
+        .map(|(base, bytes, name)| patch::Cave {
+            name,
+            offset: file_offset(*base),
+            len: bytes.len(),
+        })
         .collect();
-    for (offset, bytes, _) in &writes {
-        let target = data
-            .get_mut(*offset..*offset + bytes.len())
-            .ok_or(PatchError::Truncated)?;
-        target.copy_from_slice(bytes);
-    }
+    patch::check_caves(data, &spans, TEXT_RAW_END)?;
+
+    // Normalise first (no-ops on a clean base), then the fix. The caves
+    // were checked zero-filled above; the hooks must hold the clean bytes.
+    let mut sites: Vec<Site> = NORMALISE
+        .iter()
+        .map(|&(patched, offset, name)| Site {
+            name,
+            offset,
+            expected: &[],
+            patched,
+        })
+        .collect();
+    sites.extend([
+        Site {
+            name: "pacer spawn",
+            offset: spawn_at,
+            expected: SPAWN_ORIGINAL,
+            patched: &spawn_hook,
+        },
+        Site {
+            name: "race-clock tick",
+            offset: file_offset(TICK_HOOK),
+            expected: TICK_ORIGINAL,
+            patched: &tick_hook,
+        },
+        Site {
+            name: "main-loop refresh",
+            offset: file_offset(MAIN_HOOK),
+            expected: MAIN_ORIGINAL,
+            patched: &main_hook,
+        },
+    ]);
+    sites.extend(caves.iter().map(|(base, bytes, name)| Site {
+        name,
+        offset: file_offset(*base),
+        expected: &[],
+        patched: bytes,
+    }));
+    patch::apply(data, &sites)?;
     Ok(true)
 }
 
@@ -342,13 +299,12 @@ pub fn pacer_verified(data: &mut [u8]) -> Result<bool, PatchError> {
     if !pacer(&mut patched)? {
         return Ok(false);
     }
-    match identify_ignoring_aspect(&patched) {
-        Ok(edition) if std::ptr::eq(edition, &crate::edition::SSE1_PACER) => {
-            data.copy_from_slice(&patched);
-            Ok(true)
-        }
-        _ => Err(PatchError::Unverified(crate::edition::sha256(&patched))),
-    }
+    let mut probe = patched.clone();
+    // aspect() cannot fail; it only reports how many slots changed.
+    let _ = aspect(&mut probe, 16.0 / 9.0);
+    patch::verify_sha256(&probe, &crate::edition::SSE1_PACER_SHA256)?;
+    data.copy_from_slice(&patched);
+    Ok(true)
 }
 
 /// The 16:9 aspect constant `39 8E E3 3F` (1.7777778f32) as it appears in
@@ -427,6 +383,7 @@ pub fn aspect(data: &mut [u8], ratio: f32) -> Result<usize, PatchError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rea_launcher::identify;
 
     /// Golden bytes captured from the reference implementation.
     #[test]
@@ -465,7 +422,7 @@ mod tests {
     fn caves_do_not_overlap_and_stay_in_text() {
         let mut spans: Vec<(usize, usize)> = caves()
             .iter()
-            .map(|(base, bytes)| (file_offset(*base), file_offset(*base) + bytes.len()))
+            .map(|(base, bytes, _)| (file_offset(*base), file_offset(*base) + bytes.len()))
             .collect();
         spans.sort_unstable();
         for (a, b) in spans.iter().zip(spans.iter().skip(1)) {
@@ -489,13 +446,27 @@ mod tests {
 
         let mut data = vec![0u8; SSE1_SIZE];
         data[file_offset(SPAWN_HOOK)] = 0x90; // dirty hook site
-        assert_eq!(pacer(&mut data), Err(PatchError::NotClean("pacer spawn")));
+        assert!(matches!(
+            pacer(&mut data),
+            Err(PatchError::Check(patch::PatchError::Unexpected { name, .. })) if name == "pacer spawn"
+        ));
 
         let mut data = vec![0xFFu8; SSE1_SIZE];
         data[file_offset(SPAWN_HOOK)..file_offset(SPAWN_HOOK) + 5].copy_from_slice(SPAWN_ORIGINAL);
         data[file_offset(TICK_HOOK)..file_offset(TICK_HOOK) + 7].copy_from_slice(TICK_ORIGINAL);
         data[file_offset(MAIN_HOOK)..file_offset(MAIN_HOOK) + 5].copy_from_slice(MAIN_ORIGINAL);
-        assert_eq!(pacer(&mut data), Err(PatchError::CaveNotZero(CAVE1)));
+        assert_eq!(
+            pacer(&mut data),
+            Err(PatchError::Check(patch::PatchError::CaveNotZero {
+                name: "spawn-guard cave".into(),
+                offset: file_offset(CAVE1),
+            }))
+        );
+        // Nothing is written when a check fails.
+        assert_eq!(
+            &data[file_offset(SPAWN_HOOK)..file_offset(SPAWN_HOOK) + 5],
+            SPAWN_ORIGINAL
+        );
     }
 
     #[test]
@@ -535,7 +506,9 @@ mod tests {
         pacer(&mut expected).unwrap();
         assert_eq!(
             pacer_verified(&mut data),
-            Err(PatchError::Unverified(crate::edition::sha256(&expected)))
+            Err(PatchError::Check(patch::PatchError::Unverified {
+                sha256: identify::sha256(&expected)
+            }))
         );
         assert_eq!(data, before, "the input must stay untouched");
         // Site errors still come through unchanged.
@@ -596,10 +569,10 @@ mod tests {
         let mut data = std::fs::read(&path).expect("read the SSE1 exe");
         let applied = pacer_verified(&mut data).expect("the clean build patches to the known hash");
         println!("pacer applied: {applied}");
-        let digest = crate::edition::sha256(&data);
+        let digest = identify::sha256(&data);
         if applied {
             assert_eq!(
-                crate::edition::to_hex(&digest),
+                identify::hex(&digest),
                 "4c08c1deae28a329b6588138198556ac8eaded8444d0eb94a1fe2f1ad08f2520"
             );
         }

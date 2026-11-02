@@ -1,3 +1,6 @@
+use rea_launcher::cfg;
+pub use rea_launcher::display::STEAM_DECK_SCREEN;
+
 use crate::config::{self, Aspect, FrameLimit, Quality, Settings};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,8 +46,6 @@ impl Picture {
         }
     }
 }
-
-pub const STEAM_DECK_SCREEN: (u32, u32) = (1280, 800);
 
 /// The look to recommend on a screen: Steam Deck on a Deck, else Modern.
 pub fn recommended(screen: Option<(u32, u32)>) -> Look {
@@ -149,12 +150,10 @@ impl Form {
             return Form::first_run(screen);
         };
         let mut form = Form::new(&Settings::parse_file(text).0, screen);
-        let remembered = text
-            .lines()
-            .filter_map(config::entry)
-            .filter(|(key, _)| *key == "look")
-            .filter_map(|(_, value)| Look::parse(value))
-            .next_back();
+        let remembered = cfg::entries(text)
+            .filter(|entry| entry.key == "look")
+            .filter_map(|entry| Look::parse(entry.value))
+            .last();
         if let Some(look) = remembered {
             let fits = look
                 .picture()
@@ -197,8 +196,8 @@ impl Form {
 
     pub fn save(&self, text: &str, screen: Option<(u32, u32)>) -> String {
         let picture = self.picture.resolved(screen);
-        let mut out = config::set_key(text, "game", self.game.trim());
-        out = config::set_key(
+        let mut out = cfg::set_key(text, "game", self.game.trim());
+        out = cfg::set_key(
             &out,
             "resolution",
             &format!(
@@ -207,13 +206,13 @@ impl Form {
                 picture.resolution.unwrap().1
             ),
         );
-        out = config::set_key(&out, "aspect", picture.aspect.unwrap().key());
-        out = config::set_key(&out, "quality", picture.quality.key());
-        out = config::set_key(&out, "vsync", &picture.vsync.to_string());
-        out = config::set_key(&out, "frame-limit", self.frame_limit.key());
-        out = config::set_key(&out, "stutter-fix", &self.stutter_fix.to_string());
-        out = config::set_key(&out, "language", &self.language);
-        config::set_key(&out, "look", self.look.key())
+        out = cfg::set_key(&out, "aspect", picture.aspect.unwrap().key());
+        out = cfg::set_key(&out, "quality", picture.quality.key());
+        out = cfg::set_key(&out, "vsync", &picture.vsync.to_string());
+        out = cfg::set_key(&out, "frame-limit", self.frame_limit.key());
+        out = cfg::set_key(&out, "stutter-fix", &self.stutter_fix.to_string());
+        out = cfg::set_key(&out, "language", &self.language);
+        cfg::set_key(&out, "look", self.look.key())
     }
 }
 
@@ -231,32 +230,6 @@ pub fn stutter_fix_disabled(folder: Option<bool>) -> Option<&'static str> {
 /// Why the frame-limit chips are disabled, if they are.
 pub fn frame_limit_disabled(dxvk: bool) -> Option<&'static str> {
     (!dxvk).then_some("Needs DXVK: Linux, Wine or Proton. On Windows the game follows vsync.")
-}
-
-pub const WINDOW: (f32, f32) = (880.0, 640.0);
-
-pub fn window_zoom(screen: Option<(u32, u32)>, native: f32) -> f32 {
-    let native = if native > 0.0 { native } else { 1.0 };
-    let Some((width, height)) = screen else {
-        return 1.0;
-    };
-    let (width, height) = (width as f32, height as f32);
-    let fit = 0.9 * (width / WINDOW.0).min(height / WINDOW.1);
-    let target = (width.min(height) / 1440.0).max(1.0).min(fit);
-    let zoom = (target / native).max(1.0);
-    (zoom * 20.0).round() / 20.0
-}
-
-/// The zoom the settings window is created with. Under Wine it is the
-/// final one (XWayland can lose a resize sent after the window exists),
-/// with Wine's own DPI scale (`native`, 1.5 at 144 DPI) divided out, as
-/// Wine multiplies the window by it. On Windows the window starts at 1x.
-pub fn creation_zoom(wine: bool, screen: Option<(u32, u32)>, native: f32) -> f32 {
-    if wine {
-        window_zoom(screen, native)
-    } else {
-        1.0
-    }
 }
 
 pub fn resolutions(screen: Option<(u32, u32)>) -> Vec<(Option<(u32, u32)>, String)> {
@@ -285,50 +258,6 @@ pub const ASPECTS: [(Option<Aspect>, &str); 5] = [
     (Some(Aspect::Ratio219), "21:9"),
     (Some(Aspect::Ratio329), "32:9"),
 ];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PadAction {
-    Play,
-    Next,
-    Previous,
-    Press,
-    NextTab,
-    PreviousTab,
-}
-
-/// XInput button bits (`XINPUT_GAMEPAD_*`).
-pub mod xinput {
-    pub const DPAD_UP: u16 = 0x0001;
-    pub const DPAD_DOWN: u16 = 0x0002;
-    pub const DPAD_LEFT: u16 = 0x0004;
-    pub const DPAD_RIGHT: u16 = 0x0008;
-    pub const START: u16 = 0x0010;
-    pub const LEFT_SHOULDER: u16 = 0x0100;
-    pub const RIGHT_SHOULDER: u16 = 0x0200;
-    pub const A: u16 = 0x1000;
-}
-
-/// Window navigation: d-pad moves between controls, A changes the focused
-/// one, LB/RB switch tabs, Start plays.
-pub fn pad_actions(previous: u16, current: u16) -> Vec<PadAction> {
-    let pressed = current & !previous;
-    let mut actions = Vec::new();
-    for (mask, action) in [
-        (xinput::START, PadAction::Play),
-        (xinput::LEFT_SHOULDER, PadAction::PreviousTab),
-        (xinput::RIGHT_SHOULDER, PadAction::NextTab),
-        (xinput::DPAD_DOWN, PadAction::Next),
-        (xinput::DPAD_RIGHT, PadAction::Next),
-        (xinput::DPAD_UP, PadAction::Previous),
-        (xinput::DPAD_LEFT, PadAction::Previous),
-        (xinput::A, PadAction::Press),
-    ] {
-        if pressed & mask != 0 {
-            actions.push(action);
-        }
-    }
-    actions
-}
 
 #[cfg(test)]
 mod tests {
@@ -408,7 +337,7 @@ mod tests {
             Form::new(&Settings::parse_file(config::TEMPLATE).0, deck)
         );
         // A file holding only the game folder (written by --game) too.
-        let with_game = config::set_key(config::TEMPLATE, "game", r"D:\Sega Rally");
+        let with_game = cfg::set_key(config::TEMPLATE, "game", r"D:\Sega Rally");
         assert_eq!(
             Form::from_file(Some(&with_game), deck).game,
             r"D:\Sega Rally"
@@ -429,10 +358,10 @@ mod tests {
         // A hand edit that breaks the preset falls back to the values.
         let mut form = Form::first_run(deck);
         form.set_look(Look::Modern);
-        let edited = config::set_key(&form.save(config::TEMPLATE, deck), "quality", "ultra");
+        let edited = cfg::set_key(&form.save(config::TEMPLATE, deck), "quality", "ultra");
         assert_eq!(Form::from_file(Some(&edited), deck).look, Look::Custom);
         // An unknown look name is ignored, and is not a settings warning.
-        let odd = config::set_key(&form.save(config::TEMPLATE, deck), "look", "fancy");
+        let odd = cfg::set_key(&form.save(config::TEMPLATE, deck), "look", "fancy");
         assert_eq!(Form::from_file(Some(&odd), deck).look, Look::SteamDeck);
         assert!(Settings::parse_file(&odd).1.is_empty());
     }
@@ -492,40 +421,5 @@ mod tests {
         assert_eq!(stutter_fix_disabled(Some(true)), None);
         assert!(frame_limit_disabled(false).unwrap().contains("DXVK"));
         assert_eq!(frame_limit_disabled(true), None);
-    }
-
-    #[test]
-    fn under_wine_the_window_is_created_at_its_final_size() {
-        assert_eq!(creation_zoom(true, Some((3840, 2160)), 1.0), 1.5);
-        assert_eq!(creation_zoom(true, Some((1920, 1080)), 1.0), 1.0);
-        // Wine at 144 or 192 DPI already scales the window: never zoomed
-        // on top of that (it was 2.25x and 3x, taller than a 4K screen).
-        assert_eq!(creation_zoom(true, Some((3840, 2160)), 1.5), 1.0);
-        assert_eq!(creation_zoom(true, Some((3840, 2160)), 2.0), 1.0);
-        // 96, 120, 144 and 192 DPI all fit a 4K screen.
-        for native in [1.0, 1.25, 1.5, 2.0] {
-            let zoom = creation_zoom(true, Some((3840, 2160)), native);
-            assert!(WINDOW.1 * zoom * native <= 2160.0, "{native}");
-            assert!(WINDOW.0 * zoom * native <= 3840.0, "{native}");
-        }
-        assert_eq!(creation_zoom(false, Some((3840, 2160)), 1.5), 1.0);
-    }
-
-    #[test]
-    fn pad_buttons_are_edge_triggered() {
-        assert_eq!(pad_actions(0, xinput::START), [PadAction::Play]);
-        assert!(pad_actions(xinput::START, xinput::START).is_empty());
-    }
-
-    #[test]
-    fn pad_buttons_match_the_documented_layout() {
-        // Pinned to the XINPUT_GAMEPAD_* values, not to our own constants.
-        assert_eq!(pad_actions(0, 0x1000), [PadAction::Press]); // A
-        assert_eq!(pad_actions(0, 0x0010), [PadAction::Play]); // Start
-        assert_eq!(pad_actions(0, 0x0100), [PadAction::PreviousTab]); // LB
-        assert_eq!(pad_actions(0, 0x0200), [PadAction::NextTab]); // RB
-        assert_eq!(pad_actions(0, 0x0002), [PadAction::Next]); // d-pad down
-        assert_eq!(pad_actions(0, 0x0001), [PadAction::Previous]); // d-pad up
-        assert!(pad_actions(0, 0x0020).is_empty()); // Back does nothing
     }
 }

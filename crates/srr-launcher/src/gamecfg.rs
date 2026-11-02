@@ -5,8 +5,12 @@
 //! `config.ini` lives in `Documents\SEGA Rally\Saved Games\config.ini`.
 //! Only the `[Graphics]` keys this launcher manages are touched; existing
 //! `[Audio]` and `[GameController]` sections (which hold the player's
-//! controller GUID and mapping) are preserved verbatim. The real file is
-//! replaced atomically ([`write_atomic`]).
+//! controller GUID and mapping) are preserved verbatim, byte for byte in
+//! any encoding (the SDK's `ini` module). The caller replaces the real file
+//! atomically (`rea_launcher::fsx::write_atomic`).
+
+use rea_launcher::ini::Ini;
+use rea_launcher::wine;
 
 use crate::config::Quality;
 
@@ -27,10 +31,14 @@ pub fn quality_values(quality: Quality) -> QualityValues {
     }
 }
 
-/// Render the `[Graphics]` section this launcher manages.
-pub fn graphics_section(resolution: (u32, u32), quality: Quality, vsync: bool) -> String {
+/// The `[Graphics]` keys this launcher manages, in the game's order.
+pub fn graphics_keys(
+    resolution: (u32, u32),
+    quality: Quality,
+    vsync: bool,
+) -> [(&'static str, String); 25] {
     let values = quality_values(quality);
-    let keys = [
+    [
         ("AdapterOrdinal", "0".to_string()),
         ("RenderDevice", "Hardware".to_string()),
         ("AdapterFormat", "X8R8G8B8".to_string()),
@@ -56,8 +64,13 @@ pub fn graphics_section(resolution: (u32, u32), quality: Quality, vsync: bool) -
         ("ShaderVersion", "3".to_string()),
         ("ResolutionFilter", "1".to_string()),
         ("RunWindowed", "0".to_string()),
-    ];
-    keys.iter()
+    ]
+}
+
+/// Render the `[Graphics]` section this launcher manages.
+pub fn graphics_section(resolution: (u32, u32), quality: Quality, vsync: bool) -> String {
+    graphics_keys(resolution, quality, vsync)
+        .iter()
         .map(|(key, value)| format!("{key}={value}"))
         .collect::<Vec<_>>()
         .join("\n")
@@ -81,50 +94,43 @@ pub fn seed_sections() -> String {
     .to_string()
 }
 
-/// Merge our managed `[Graphics]` keys into an existing config.ini text.
-/// Only `[Graphics]` is edited (see [`crate::ini`]): keys are updated in
-/// place whatever their case or spacing, missing keys are added to the
-/// section, a missing section is appended. `[Audio]`, `[GameController]`
-/// and every comment or unknown key stay exactly as they were.
+/// Sets our managed `[Graphics]` keys in `ini` (`key=value`, the game's
+/// spelling): keys are updated in place whatever their case or spacing,
+/// missing keys are added to the section, a missing section is appended.
+/// `[Audio]`, `[GameController]` and every comment or unknown key stay
+/// exactly as they were.
+fn set_graphics(ini: &mut Ini, resolution: (u32, u32), quality: Quality, vsync: bool) {
+    for (key, value) in graphics_keys(resolution, quality, vsync) {
+        ini.set("Graphics", key, &value);
+    }
+}
+
+/// [`update_config_bytes`] on text.
 pub fn update_config(
     existing: &str,
     resolution: (u32, u32),
     quality: Quality,
     vsync: bool,
 ) -> String {
-    graphics_section(resolution, quality, vsync)
-        .lines()
-        .map(|line| line.split_once('=').expect("key=value"))
-        .fold(existing.to_string(), |text, (key, value)| {
-            crate::ini::set_section_key(&text, "Graphics", key, value)
-        })
+    let mut ini = Ini::parse(existing).tight();
+    set_graphics(&mut ini, resolution, quality, vsync);
+    ini.to_text().expect("parsed from text")
 }
 
-/// The UTF-8 byte-order mark some editors put at the start of config.ini.
-const BOM: &[u8] = b"\xEF\xBB\xBF";
-
-/// [`update_config`] on the file's raw bytes, changing nothing but the
-/// managed `[Graphics]` lines. The text is handled one byte per character
-/// (Latin-1), so a controller name or path in any encoding — valid UTF-8
-/// or not — is written back byte for byte. A leading UTF-8 BOM is set
-/// aside, so `[Graphics]` on the first line still matches, and kept.
+/// Our managed `[Graphics]` lines merged into the file's raw bytes,
+/// changing nothing else. A file that is not UTF-8 is edited one byte per
+/// character, so a controller name or path in any encoding is written back
+/// byte for byte; a leading UTF-8 BOM is set aside, so `[Graphics]` on the
+/// first line still matches, and kept.
 pub fn update_config_bytes(
     existing: &[u8],
     resolution: (u32, u32),
     quality: Quality,
     vsync: bool,
 ) -> Vec<u8> {
-    let (bom, body) = match existing.strip_prefix(BOM) {
-        Some(body) => (BOM, body),
-        None => (&[][..], existing),
-    };
-    let text: String = body.iter().map(|&byte| char::from(byte)).collect();
-    let updated = update_config(&text, resolution, quality, vsync);
-    let mut out = bom.to_vec();
-    // Our edits are ASCII and the rest came from single bytes, so every
-    // character fits in one byte again.
-    out.extend(updated.chars().map(|c| c as u8));
-    out
+    let mut ini = Ini::from_bytes(existing).tight();
+    set_graphics(&mut ini, resolution, quality, vsync);
+    ini.to_bytes()
 }
 
 /// What to write to config.ini given the result of reading it: the
@@ -143,43 +149,6 @@ pub fn next_config(
             Ok(seed_config(resolution, quality, vsync).into_bytes())
         }
         Err(error) => Err(error),
-    }
-}
-
-/// Replace `path` with `text` atomically: a crash or a full disk mid-write
-/// leaves the player's previous file, never a truncated one.
-pub fn write_atomic(path: &std::path::Path, text: impl AsRef<[u8]>) -> std::io::Result<()> {
-    let mut temp = path.as_os_str().to_owned();
-    temp.push(".srr-tmp");
-    let temp = std::path::PathBuf::from(temp);
-    std::fs::write(&temp, text)?;
-    // Windows: antivirus or OneDrive can hold the file for a moment.
-    let attempts = if cfg!(windows) { 5 } else { 1 };
-    retry_denied(attempts, std::time::Duration::from_millis(100), || {
-        std::fs::rename(&temp, path)
-    })
-    .inspect_err(|_| {
-        let _ = std::fs::remove_file(&temp);
-    })
-}
-
-/// Runs `step` up to `attempts` times while it fails with
-/// `PermissionDenied`, sleeping `delay` between tries; any other result is
-/// returned at once.
-fn retry_denied(
-    attempts: u32,
-    delay: std::time::Duration,
-    mut step: impl FnMut() -> std::io::Result<()>,
-) -> std::io::Result<()> {
-    let mut left = attempts.max(1);
-    loop {
-        left -= 1;
-        match step() {
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied && left > 0 => {
-                std::thread::sleep(delay);
-            }
-            result => return result,
-        }
     }
 }
 
@@ -202,20 +171,21 @@ pub const BOOTUP_VIDEOS: [&str; 2] = [
 
 pub const DISABLED_SUFFIX: &str = ".srr-disabled";
 
-/// Wine's input bus key (`HKLM`), read by `winebus.sys` when the bus starts.
-pub const WINEBUS_KEY: &str = r"System\CurrentControlSet\Services\winebus";
+/// Leftover temp files of earlier releases' `config.ini` writes
+/// (`config.ini.srr-tmp`); removed once with `fsx::remove_stale_temps`.
+pub const OLD_TEMP_SUFFIX: &str = ".srr-tmp";
 
-/// The controller bridge this game needs under Wine: Wine's SDL-backed
-/// XInput device (`Map Controllers=1`), with the raw hidraw/evdev duplicates
-/// kept out. The value names are exactly what `winebus.sys` reads —
-/// `DisableHidraw`/`DisableInput` without a space, `Enable SDL`/`Map
-/// Controllers` with one. Seeded only when absent, so a player's own value
+/// The controller bridge this game needs under Wine (under the SDK's
+/// `wine::WINEBUS_KEY`): Wine's SDL-backed XInput device (`Map
+/// Controllers=1`, unlike the SDK's `SDL_ONLY` baseline), with the raw
+/// hidraw/evdev duplicates kept out. The value names are exactly what
+/// `winebus.sys` reads. Seeded only when absent, so a player's own value
 /// always wins.
 pub const WINEBUS_VALUES: [(&str, u32); 4] = [
-    ("DisableHidraw", 1),
-    ("DisableInput", 1),
-    ("Enable SDL", 1),
-    ("Map Controllers", 1),
+    (wine::DISABLE_HIDRAW, 1),
+    (wine::DISABLE_INPUT, 1),
+    (wine::ENABLE_SDL, 1),
+    (wine::MAP_CONTROLLERS, 1),
 ];
 
 /// DXVK-side frame limiter, the community-standard pacing guard for this
@@ -232,40 +202,16 @@ pub fn dxvk_conf(limit: Option<u32>) -> String {
 /// stray `d3d9=b` in the environment replaces DXVK.
 pub const DXVK_OVERRIDE: &str = "d3d9=n,b";
 
-/// `d3d9` as Wine accepts it in an override: any case, with or without
-/// `.dll`.
-fn is_d3d9(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    lower.strip_suffix(".dll").unwrap_or(&lower) == "d3d9"
-}
-
 /// `WINEDLLOVERRIDES` for the game: our `d3d9` rule first when DXVK is
 /// installed, every unrelated rule the caller set kept (the AppImage's
 /// `mscoree,mshtml=` among them), and only the `d3d9` names we own
-/// replaced. Without DXVK the caller's value is passed through unchanged.
+/// replaced (`wine::merge_dll_overrides`). Without DXVK the caller's value
+/// is passed through unchanged.
 pub fn wine_overrides(existing: Option<&str>, dxvk: bool) -> Option<String> {
     if !dxvk {
         return existing.map(str::to_string);
     }
-    let mut result = vec![DXVK_OVERRIDE.to_string()];
-    for rule in existing.into_iter().flat_map(|rules| rules.split(';')) {
-        if rule.trim().is_empty() {
-            continue;
-        }
-        let Some((names, action)) = rule.split_once('=') else {
-            result.push(rule.to_string());
-            continue;
-        };
-        let kept: Vec<&str> = names
-            .split(',')
-            .map(str::trim)
-            .filter(|name| !name.is_empty() && !is_d3d9(name))
-            .collect();
-        if !kept.is_empty() {
-            result.push(format!("{}={action}", kept.join(",")));
-        }
-    }
-    Some(result.join(";"))
+    Some(wine::merge_dll_overrides(DXVK_OVERRIDE, existing))
 }
 
 /// Registry values the game reads before it will start. `installdir` is
@@ -389,7 +335,10 @@ mod tests {
             ]
         );
         assert!(WINEBUS_VALUES.iter().all(|(_, value)| *value == 1));
-        assert_eq!(WINEBUS_KEY, r"System\CurrentControlSet\Services\winebus");
+        assert_eq!(
+            wine::WINEBUS_KEY,
+            r"System\CurrentControlSet\Services\winebus"
+        );
     }
 
     #[test]
@@ -468,50 +417,6 @@ mod tests {
             String::from_utf8_lossy(&out).matches("[Graphics]").count(),
             1
         );
-    }
-
-    #[test]
-    fn a_denied_rename_is_retried_a_few_times() {
-        use std::io::{Error, ErrorKind};
-        let no_wait = std::time::Duration::ZERO;
-        let mut calls = 0;
-        let ok = retry_denied(5, no_wait, || {
-            calls += 1;
-            if calls < 3 {
-                Err(Error::from(ErrorKind::PermissionDenied))
-            } else {
-                Ok(())
-            }
-        });
-        assert!(ok.is_ok());
-        assert_eq!(calls, 3);
-        calls = 0;
-        let denied = retry_denied(5, no_wait, || {
-            calls += 1;
-            Err(Error::from(ErrorKind::PermissionDenied))
-        });
-        assert_eq!(denied.unwrap_err().kind(), ErrorKind::PermissionDenied);
-        assert_eq!(calls, 5);
-        calls = 0;
-        let other = retry_denied(5, no_wait, || {
-            calls += 1;
-            Err(Error::from(ErrorKind::NotFound))
-        });
-        assert_eq!(other.unwrap_err().kind(), ErrorKind::NotFound);
-        assert_eq!(calls, 1, "only PermissionDenied is retried");
-    }
-
-    #[test]
-    fn write_atomic_replaces_the_file_and_leaves_no_temp() {
-        let dir = std::env::temp_dir().join(format!("srr-atomic-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("config.ini");
-        std::fs::write(&path, "old").unwrap();
-        write_atomic(&path, "new").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
-        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

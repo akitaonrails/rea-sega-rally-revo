@@ -11,21 +11,14 @@ name = "SRRLauncher"
 path = "src/main.rs"
 
 [dependencies]
-sha2.workspace = true
+rea-launcher.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+rea-launcher-win32.workspace = true
+rea-launcher-ui.workspace = true
 eframe = { version = "0.37", default-features = false, features = ["glow"] }
-jpeg-decoder = { version = "0.3", default-features = false }
 
-[target.'cfg(windows)'.dependencies.windows-sys]
-workspace = true
-features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_Security",
-    "Win32_System_Registry",
-    "Win32_System_LibraryLoader",
-    "Win32_UI_Shell",
-    "Win32_UI_Shell_Common",
-    "Win32_UI_WindowsAndMessaging",
-]
+# The palette's contrast test runs on the host too.
+[dev-dependencies]
+rea-launcher-ui.workspace = true
+eframe = { version = "0.37", default-features = false, features = ["glow"] }

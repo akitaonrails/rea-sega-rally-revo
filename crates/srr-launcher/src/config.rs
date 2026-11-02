@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use rea_launcher::cfg::{self, ArgError, Rejected};
+
 /// Display aspect ratios. `16:9` and `16:10` exist in the game's own
 /// tables; the ultra-wide ratios are patched into the runtime copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,144 +218,98 @@ fn canonical_language(value: &str) -> Option<&'static str> {
         .find(|language| language.eq_ignore_ascii_case(value.trim()))
 }
 
-fn parse_bool(value: &str) -> Option<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "true" | "yes" | "on" | "1" => Some(true),
-        "false" | "no" | "off" | "0" => Some(false),
-        _ => None,
-    }
-}
-
+/// `WIDTHxHEIGHT` within 640x480..=7680x4320 (sizes only, no words).
 fn parse_resolution(value: &str) -> Option<(u32, u32)> {
-    let value = value.trim().to_ascii_lowercase();
-    let (width, height) = value.split_once('x')?;
-    let width = width.trim().parse().ok()?;
-    let height = height.trim().parse().ok()?;
-    ((640..=7680).contains(&width) && (480..=4320).contains(&height)).then_some((width, height))
+    cfg::parse_size(value, (640, 480), (7680, 4320))
 }
 
-pub(crate) fn entry(line: &str) -> Option<(&str, &str)> {
-    let line = line.trim();
-    if line.starts_with('#') {
-        return None;
+/// The settings keys, as the command line spells them (`--frame-limit`
+/// arrives as `frame_limit`); the file keeps its hyphenated spelling.
+const FLAG_KEYS: [&str; 9] = [
+    "game",
+    "runtime",
+    "resolution",
+    "aspect",
+    "quality",
+    "vsync",
+    "frame_limit",
+    "stutter_fix",
+    "language",
+];
+
+/// SRR's own messages for a refused command line (shown in a message box).
+fn arg_message(error: ArgError) -> String {
+    match error {
+        ArgError::Help => USAGE.to_string(),
+        ArgError::Unknown(flag) => format!("unknown option {flag}\n\n{USAGE}"),
+        ArgError::MissingValue(flag) => format!("{flag} needs a value\n\n{USAGE}"),
+        ArgError::Bad { flag, value, .. } => match flag.as_str() {
+            "--vsync" => format!("invalid vsync value {value}"),
+            "--stutter-fix" => format!("invalid stutter-fix value {value}"),
+            "--frame-limit" => format!("invalid frame limit {value}\n\n{USAGE}"),
+            other => format!(
+                "invalid {} {value}\n\n{USAGE}",
+                other.trim_start_matches('-')
+            ),
+        },
     }
-    let (key, value) = line.split_once('=')?;
-    let value = value.trim();
-    (!value.is_empty()).then_some((key.trim(), value))
 }
 
 impl Settings {
+    /// Takes one `key = value` (file spelling: `frame-limit`).
+    pub fn apply(&mut self, key: &str, value: &str) -> Result<(), Rejected> {
+        match key {
+            "game" => self.game = Some(value.into()),
+            "runtime" => self.runtime = Some(value.into()),
+            "resolution" => {
+                self.resolution = Some(cfg::need(parse_resolution(value), "WIDTHxHEIGHT")?)
+            }
+            "aspect" => {
+                self.aspect = Some(cfg::need(
+                    Aspect::parse(value),
+                    "16:9, 16:10, 21:9 or 32:9",
+                )?)
+            }
+            "quality" => {
+                self.quality = Some(cfg::need(Quality::parse(value), "normal, high or ultra")?)
+            }
+            "vsync" => self.vsync = Some(cfg::need(cfg::parse_bool(value), cfg::ON_OFF)?),
+            "frame-limit" => {
+                self.frame_limit = Some(cfg::need(FrameLimit::parse(value), "60, 120 or off")?)
+            }
+            "stutter-fix" => {
+                self.stutter_fix = Some(cfg::need(cfg::parse_bool(value), cfg::ON_OFF)?)
+            }
+            "language" => {
+                let language = cfg::need(canonical_language(value), "a supported language")?;
+                self.language = Some(language.to_string());
+            }
+            _ => return Err(Rejected::Unknown),
+        }
+        Ok(())
+    }
+
+    /// The settings in a `launcher.cfg` text and a warning per bad line.
+    /// Keys this launcher does not know (`look`, removed ones such as
+    /// `fullscreen`) are skipped without a warning.
     pub fn parse_file(text: &str) -> (Settings, Vec<String>) {
         let mut settings = Settings::default();
-        let mut warnings = Vec::new();
-        for (index, line) in text.lines().enumerate() {
-            let Some((key, value)) = entry(line) else {
-                continue;
-            };
-            let mut bad = || {
-                warnings.push(format!(
-                    "{FILE_NAME} line {}: invalid {key} {value:?}",
-                    index + 1
-                ))
-            };
-            match key {
-                "game" => settings.game = Some(value.into()),
-                "runtime" => settings.runtime = Some(value.into()),
-                "resolution" => match parse_resolution(value) {
-                    Some(value) => settings.resolution = Some(value),
-                    None => bad(),
-                },
-                "aspect" => match Aspect::parse(value) {
-                    Some(value) => settings.aspect = Some(value),
-                    None => bad(),
-                },
-                "quality" => match Quality::parse(value) {
-                    Some(value) => settings.quality = Some(value),
-                    None => bad(),
-                },
-                "vsync" => match parse_bool(value) {
-                    Some(value) => settings.vsync = Some(value),
-                    None => bad(),
-                },
-                "frame-limit" => match FrameLimit::parse(value) {
-                    Some(value) => settings.frame_limit = Some(value),
-                    None => bad(),
-                },
-                "stutter-fix" => match parse_bool(value) {
-                    Some(value) => settings.stutter_fix = Some(value),
-                    None => bad(),
-                },
-                "language" => match canonical_language(value) {
-                    Some(language) => settings.language = Some(language.to_string()),
-                    None => bad(),
-                },
-                _ => {}
+        let warnings = cfg::parse(text, FILE_NAME, |key, value| {
+            match settings.apply(key, value) {
+                Err(Rejected::Unknown) => Ok(()),
+                other => other,
             }
-        }
+        });
         (settings, warnings)
     }
 
+    /// `--key value` options; the error is the message to show.
     pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Settings, String> {
         let mut settings = Settings::default();
-        let mut args = args.into_iter();
-        while let Some(arg) = args.next() {
-            let mut value = |name: &str| {
-                args.next()
-                    .ok_or_else(|| format!("{name} needs a value\n\n{USAGE}"))
-            };
-            match arg.as_str() {
-                "--game" => settings.game = Some(value("--game")?.into()),
-                "--runtime" => settings.runtime = Some(value("--runtime")?.into()),
-                "--resolution" => {
-                    let text = value("--resolution")?;
-                    settings.resolution = Some(
-                        parse_resolution(&text)
-                            .ok_or_else(|| format!("invalid resolution {text}\n\n{USAGE}"))?,
-                    );
-                }
-                "--aspect" => {
-                    let text = value("--aspect")?;
-                    settings.aspect = Some(
-                        Aspect::parse(&text)
-                            .ok_or_else(|| format!("invalid aspect {text}\n\n{USAGE}"))?,
-                    );
-                }
-                "--quality" => {
-                    let text = value("--quality")?;
-                    settings.quality = Some(
-                        Quality::parse(&text)
-                            .ok_or_else(|| format!("invalid quality {text}\n\n{USAGE}"))?,
-                    );
-                }
-                "--vsync" => {
-                    let text = value("--vsync")?;
-                    settings.vsync = Some(
-                        parse_bool(&text).ok_or_else(|| format!("invalid vsync value {text}"))?,
-                    );
-                }
-                "--frame-limit" => {
-                    let text = value("--frame-limit")?;
-                    settings.frame_limit = Some(
-                        FrameLimit::parse(&text)
-                            .ok_or_else(|| format!("invalid frame limit {text}\n\n{USAGE}"))?,
-                    );
-                }
-                "--stutter-fix" => {
-                    let text = value("--stutter-fix")?;
-                    settings.stutter_fix = Some(
-                        parse_bool(&text)
-                            .ok_or_else(|| format!("invalid stutter-fix value {text}"))?,
-                    );
-                }
-                "--language" => {
-                    let text = value("--language")?;
-                    let language = canonical_language(&text)
-                        .ok_or_else(|| format!("invalid language {text}\n\n{USAGE}"))?;
-                    settings.language = Some(language.to_string());
-                }
-                _ => return Err(format!("unknown option {arg}\n\n{USAGE}")),
-            }
-        }
+        cfg::parse_args(args, &FLAG_KEYS, &[], |key, value| {
+            settings.apply(&key.replace('_', "-"), value)
+        })
+        .map_err(arg_message)?;
         Ok(settings)
     }
 
@@ -402,30 +358,12 @@ impl Settings {
     }
 }
 
+/// A screen size as a landscape resolution worth offering. SRR's rule
+/// takes 640x480 itself, unlike the SDK's `display::landscape` (larger
+/// than 640x480), so it stays here.
 pub fn landscape((a, b): (u32, u32)) -> Option<(u32, u32)> {
     let (width, height) = (a.max(b) & !1, a.min(b) & !1);
     (width >= 640 && height >= 480 && width <= 7680 && height <= 4320).then_some((width, height))
-}
-
-pub fn set_key(text: &str, key: &str, value: &str) -> String {
-    let mut found = false;
-    let mut lines: Vec<String> = text
-        .lines()
-        .map(|line| {
-            if entry(line).is_some_and(|(candidate, _)| candidate == key) {
-                found = true;
-                format!("{key} = {value}")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect();
-    if !found {
-        lines.push(format!("{key} = {value}"));
-    }
-    let mut out = lines.join("\n");
-    out.push('\n');
-    out
 }
 
 #[cfg(test)]
@@ -512,16 +450,64 @@ mod tests {
     #[test]
     fn keys_are_updated_without_losing_comments() {
         let text = "# hello\nquality = normal\nvsync = true\n";
-        let text = set_key(text, "quality", "high");
+        let text = cfg::set_key(text, "quality", "high");
         assert!(text.contains("# hello\nquality = high\n"));
     }
 
     #[test]
     fn rotated_screens_become_landscape() {
         assert_eq!(landscape((2160, 3840)), Some((3840, 2160)));
+        // 640x480 itself is offered (the SDK's rule starts above it).
+        assert_eq!(landscape((480, 640)), Some((640, 480)));
+        assert_eq!(landscape((639, 480)), None);
         assert_eq!(Aspect::for_resolution(1280, 800), Aspect::Ratio1610);
         assert_eq!(Aspect::for_resolution(3440, 1440), Aspect::Ratio219);
         assert_eq!(Aspect::for_resolution(3840, 1080), Aspect::Ratio329);
+    }
+
+    #[test]
+    fn hyphenated_keys_and_their_flags() {
+        let (file, warnings) = Settings::parse_file("frame-limit = off\nstutter-fix = off\n");
+        assert!(warnings.is_empty());
+        assert_eq!(file.frame_limit, Some(FrameLimit::Off));
+        assert_eq!(file.stutter_fix, Some(false));
+        // the underscore spelling is not a key of this file
+        let (other, _) = Settings::parse_file("frame_limit = off\n");
+        assert_eq!(other.frame_limit, None);
+        let cli = Settings::parse_args(
+            ["--frame-limit", "120", "--stutter-fix", "off"].map(String::from),
+        )
+        .unwrap();
+        assert_eq!(cli.frame_limit, Some(FrameLimit::Fps120));
+        assert_eq!(cli.stutter_fix, Some(false));
+    }
+
+    #[test]
+    fn refused_options_keep_their_messages() {
+        let args =
+            |list: &[&str]| Settings::parse_args(list.iter().map(|a| a.to_string())).unwrap_err();
+        assert_eq!(
+            args(&["--bogus"]),
+            format!("unknown option --bogus\n\n{USAGE}")
+        );
+        assert_eq!(
+            args(&["--game"]),
+            format!("--game needs a value\n\n{USAGE}")
+        );
+        assert_eq!(args(&["--vsync", "maybe"]), "invalid vsync value maybe");
+        assert_eq!(args(&["--stutter-fix", "x"]), "invalid stutter-fix value x");
+        assert_eq!(
+            args(&["--frame-limit", "7"]),
+            format!("invalid frame limit 7\n\n{USAGE}")
+        );
+        assert_eq!(
+            args(&["--resolution", "huge"]),
+            format!("invalid resolution huge\n\n{USAGE}")
+        );
+        assert_eq!(
+            args(&["--language", "Klingon"]),
+            format!("invalid language Klingon\n\n{USAGE}")
+        );
     }
 
     #[test]

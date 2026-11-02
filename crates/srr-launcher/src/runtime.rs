@@ -1,24 +1,18 @@
-use std::collections::BTreeMap;
+//! The private runtime copy of the game folder: Sega Rally Revo's
+//! [`Policy`] on the SDK's runtime engine (`rea_launcher::runtime`), which
+//! lists, plans, copies as whole-file swaps and keeps the manifest.
+
+use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rea_launcher::paths::native;
+use rea_launcher::runtime::{self, Policy, Stamp, SyncReport};
+
+/// The manifest of the last copy (`size\tmtime\trel` lines, the SDK's
+/// format, which this launcher already wrote).
 pub const MANIFEST: &str = ".srr-manifest";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Stamp {
-    pub size: u64,
-    pub mtime: u64,
-}
-
-pub type Listing = BTreeMap<String, Stamp>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Plan {
-    pub copy: Vec<String>,
-    pub manifest: Listing,
-}
 
 /// The marker `SRRLauncher` leaves next to the DXVK `d3d9.dll` it installs.
 pub const DXVK_MARKER: &str = ".srr-dxvk";
@@ -35,221 +29,36 @@ pub fn is_owned(rel: &str, dxvk_managed: bool) -> bool {
         || (dxvk_managed && rel.eq_ignore_ascii_case("d3d9.dll"))
 }
 
-/// Decides which files to copy: a file missing from the runtime or changed
-/// in the source since the last copy (per the manifest), never one the
-/// launcher owns.
-pub fn plan(
-    source: &Listing,
-    runtime_has: &dyn Fn(&str) -> bool,
-    manifest: &Listing,
-    dxvk_managed: bool,
-) -> Plan {
-    let mut copy = Vec::new();
-    let mut next = Listing::new();
-    for (rel, stamp) in source {
-        if is_owned(rel, dxvk_managed) {
-            continue;
-        }
-        let present = runtime_has(rel);
-        let changed = manifest.get(rel) != Some(stamp);
-        if !present || changed {
-            copy.push(rel.clone());
-        }
-        next.insert(rel.clone(), *stamp);
+/// What Sega Rally Revo's runtime copy needs: nothing is linked (the exes
+/// are patched there), the launcher's own files are never copied, and a
+/// boot video the launcher switched off still counts as present.
+pub struct Srr {
+    pub dxvk_managed: bool,
+}
+
+impl Policy for Srr {
+    fn owned(&self, rel: &str, _source: Stamp) -> bool {
+        is_owned(rel, self.dxvk_managed)
     }
-    Plan {
-        copy,
-        manifest: next,
+
+    fn present(&self, _rel: &str, path: &Path) -> bool {
+        let regular = |path: &Path| fs::symlink_metadata(path).is_ok_and(|m| m.is_file());
+        regular(path) || regular(&disabled_path(path))
     }
 }
 
-pub fn parse_manifest(text: &str) -> Listing {
-    text.lines()
-        .filter_map(|line| {
-            let mut parts = line.splitn(3, '\t');
-            let size = parts.next()?.parse().ok()?;
-            let mtime = parts.next()?.parse().ok()?;
-            Some((parts.next()?.to_owned(), Stamp { size, mtime }))
-        })
-        .collect()
-}
-
-pub fn format_manifest(listing: &Listing) -> String {
-    listing
-        .iter()
-        .map(|(rel, s)| format!("{}\t{}\t{}\n", s.size, s.mtime, rel))
-        .collect()
-}
-
-fn mtime_secs(meta: &fs::Metadata) -> u64 {
-    meta.modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_secs())
-}
-
-pub fn list(root: &Path) -> io::Result<Listing> {
-    fn walk(root: &Path, dir: &Path, out: &mut Listing) -> io::Result<()> {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            let meta = entry.metadata()?;
-            if meta.is_dir() {
-                walk(root, &path, out)?;
-            } else if meta.is_file() {
-                let rel = path
-                    .strip_prefix(root)
-                    .expect("walk stays below root")
-                    .components()
-                    .map(|c| c.as_os_str().to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join("/");
-                out.insert(
-                    rel,
-                    Stamp {
-                        size: meta.len(),
-                        mtime: mtime_secs(&meta),
-                    },
-                );
-            }
-        }
-        Ok(())
-    }
-    let mut out = Listing::new();
-    walk(root, root, &mut out)?;
-    Ok(out)
-}
-
-pub fn native(root: &Path, rel: &str) -> PathBuf {
-    rel.split('/')
-        .fold(root.to_path_buf(), |p, part| p.join(part))
-}
-
-/// `.` and `..` removed lexically.
-fn normalize(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                if !normalized.pop() && !normalized.has_root() {
-                    normalized.push("..");
-                }
-            }
-            _ => normalized.push(component.as_os_str()),
-        }
-    }
-    normalized
-}
-
-/// Resolves a path even when its final components do not exist yet (a
-/// first-run runtime folder). Canonicalizing the nearest existing ancestor
-/// resolves symlinks and Windows path aliases; the missing suffix is then
-/// normalized lexically. Ported from the CMR04 launcher. When a volume
-/// cannot be canonicalized at all (Windows RAM disks, `subst` drives and
-/// some network shares answer "Incorrect function"), the absolute path is
-/// normalized lexically instead of refusing to launch.
-pub fn resolve(path: &Path, cwd: &Path) -> Result<PathBuf, String> {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
-    let mut ancestor = absolute.as_path();
-    let mut suffix = Vec::new();
-    loop {
-        match fs::canonicalize(ancestor) {
-            Ok(mut resolved) => {
-                for component in suffix.iter().rev() {
-                    resolved.push(component);
-                }
-                return Ok(normalize(&resolved));
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                match ancestor.components().next_back() {
-                    Some(std::path::Component::Normal(name)) => suffix.push(name.to_os_string()),
-                    Some(std::path::Component::ParentDir) => suffix.push("..".into()),
-                    Some(std::path::Component::CurDir) => {}
-                    _ => return Err(format!("cannot resolve {}: {error}", path.display())),
-                }
-                ancestor = ancestor
-                    .parent()
-                    .ok_or_else(|| format!("cannot resolve {}: {error}", path.display()))?;
-            }
-            Err(_) => return Ok(normalize(&absolute)),
-        }
-    }
-}
-
-fn check_separate_from(game: &Path, runtime: &Path, cwd: &Path) -> Result<(), String> {
-    let absolute_game = if game.is_absolute() {
-        game.to_path_buf()
-    } else {
-        cwd.join(game)
-    };
-    let game = match fs::canonicalize(&absolute_game) {
-        Ok(game) => game,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Err(format!("game folder {}: {error}", game.display()));
-        }
-        // A volume that cannot be canonicalized: compare lexically.
-        Err(_) => normalize(&absolute_game),
-    };
-    let runtime = resolve(runtime, cwd)?;
-    if runtime.starts_with(&game) || game.starts_with(&runtime) {
-        return Err("the runtime folder must be outside the game folder".into());
-    }
-    Ok(())
-}
-
-/// Refuses a runtime folder inside the game folder (or the reverse), even
-/// when the runtime does not exist yet or is reached through `..` or a
-/// symlink: the player's game folder is read only.
-pub fn check_separate(game: &Path, runtime: &Path) -> Result<(), String> {
-    let cwd = std::env::current_dir().map_err(|error| format!("current directory: {error}"))?;
-    check_separate_from(game, runtime, &cwd)
-}
-
-fn make_writable(path: &Path) -> io::Result<()> {
-    let mut permissions = fs::metadata(path)?.permissions();
-    #[allow(clippy::permissions_set_readonly_false)]
-    permissions.set_readonly(false);
-    fs::set_permissions(path, permissions)
+/// `path` with the switched-off suffix.
+fn disabled_path(path: &Path) -> PathBuf {
+    let mut name = OsString::from(path.as_os_str());
+    name.push(crate::gamecfg::DISABLED_SUFFIX);
+    name.into()
 }
 
 /// Brings the runtime copy up to date with the game folder. `linux` means
 /// the launcher installs its DXVK `d3d9.dll` in this run.
-pub fn sync(game: &Path, runtime: &Path, linux: bool) -> io::Result<usize> {
-    let source = list(game)?;
-    fs::create_dir_all(runtime)?;
+pub fn sync(game: &Path, runtime: &Path, linux: bool) -> io::Result<SyncReport> {
     let dxvk_managed = linux || runtime.join(DXVK_MARKER).is_file();
-    let manifest_path = runtime.join(MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path)
-        .map(|text| parse_manifest(&text))
-        .unwrap_or_default();
-    // A file the launcher renamed out of the way still counts as present.
-    let present =
-        |rel: &str| native(runtime, rel).is_file() || native(runtime, &disabled(rel)).is_file();
-    let plan = plan(&source, &present, &manifest, dxvk_managed);
-    for rel in &plan.copy {
-        let from = native(game, rel);
-        let to = native(runtime, rel);
-        if let Some(dir) = to.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        if to.exists() {
-            make_writable(&to)?;
-        }
-        fs::copy(&from, &to)?;
-        make_writable(&to)?;
-        let stamp = source[rel];
-        fs::OpenOptions::new()
-            .write(true)
-            .open(&to)?
-            .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(stamp.mtime))?;
-    }
-    fs::write(&manifest_path, format_manifest(&plan.manifest))?;
-    Ok(plan.copy.len())
+    runtime::sync(game, runtime, &Srr { dxvk_managed }, MANIFEST)
 }
 
 /// The name a runtime file gets when the launcher switches it off.
@@ -274,6 +83,8 @@ pub fn disable_bootup_videos(runtime: &Path) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rea_launcher::runtime::{Listing, plan};
+    use std::collections::BTreeMap;
 
     fn stamp(size: u64, mtime: u64) -> Stamp {
         Stamp { size, mtime }
@@ -287,39 +98,41 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_files_are_not_recopied() {
-        let source = BTreeMap::from([("SEGA Rally.exe".into(), stamp(10, 20))]);
-        assert!(plan(&source, &|_| true, &source, false).copy.is_empty());
-        assert_eq!(
-            plan(&source, &|_| false, &source, false).copy,
-            ["SEGA Rally.exe"]
-        );
-        let changed = BTreeMap::from([("SEGA Rally.exe".into(), stamp(11, 20))]);
-        assert_eq!(
-            plan(&changed, &|_| true, &source, false).copy,
-            ["SEGA Rally.exe"]
-        );
-    }
-
-    #[test]
-    fn manifest_round_trips_with_spaces() {
-        let listing = BTreeMap::from([("folder/a file.ini".into(), stamp(10, 20))]);
-        assert_eq!(parse_manifest(&format_manifest(&listing)), listing);
-    }
-
-    #[test]
     fn sync_copies_changes_and_preserves_generated_files() {
         let game = temp("game");
         let runtime = temp("runtime");
         fs::create_dir_all(game.join("Bootup/video/Rally")).unwrap();
         fs::write(game.join("SEGA Rally.exe"), b"one").unwrap();
         fs::write(game.join("Bootup/video/Rally/SEGA_Logo720p.wmv"), b"vid").unwrap();
-        assert_eq!(sync(&game, &runtime, false).unwrap(), 2);
+        assert_eq!(sync(&game, &runtime, false).unwrap().brought, 2);
         fs::write(runtime.join("dxvk.conf"), b"ours").unwrap();
-        assert_eq!(sync(&game, &runtime, false).unwrap(), 0);
+        assert_eq!(sync(&game, &runtime, false).unwrap().brought, 0);
         fs::write(game.join("SEGA Rally.exe"), b"two!").unwrap();
-        assert_eq!(sync(&game, &runtime, false).unwrap(), 1);
+        assert_eq!(sync(&game, &runtime, false).unwrap().brought, 1);
+        assert_eq!(fs::read(runtime.join("SEGA Rally.exe")).unwrap(), b"two!");
         assert_eq!(fs::read(runtime.join("dxvk.conf")).unwrap(), b"ours");
+        // Nothing is linked: the exes are patched in the runtime.
+        assert_eq!(sync(&game, &runtime, false).unwrap().linked, 0);
+        fs::remove_dir_all(game).unwrap();
+        fs::remove_dir_all(runtime).unwrap();
+    }
+
+    #[test]
+    fn a_manifest_written_by_an_earlier_release_keeps_working() {
+        let game = temp("old-manifest-game");
+        let runtime = temp("old-manifest-runtime");
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(&runtime).unwrap();
+        fs::write(game.join("a file.txt"), b"data").unwrap();
+        fs::write(runtime.join("a file.txt"), b"data").unwrap();
+        let source = runtime::list(&game).unwrap()["a file.txt"];
+        // the format earlier releases wrote: size, mtime, path
+        fs::write(
+            runtime.join(MANIFEST),
+            format!("{}\t{}\ta file.txt\n", source.size, source.mtime),
+        )
+        .unwrap();
+        assert_eq!(sync(&game, &runtime, false).unwrap().brought, 0);
         fs::remove_dir_all(game).unwrap();
         fs::remove_dir_all(runtime).unwrap();
     }
@@ -332,7 +145,7 @@ mod tests {
         fs::create_dir_all(native(&game, video).parent().unwrap()).unwrap();
         fs::write(native(&game, video), b"vid").unwrap();
         for launch in 0..2 {
-            let copied = sync(&game, &runtime, false).unwrap();
+            let copied = sync(&game, &runtime, false).unwrap().brought;
             assert_eq!(copied, usize::from(launch == 0));
             assert_eq!(disable_bootup_videos(&runtime), usize::from(launch == 0));
             assert!(!native(&runtime, video).exists());
@@ -340,7 +153,7 @@ mod tests {
         }
         // A changed source is copied fresh and switched off again.
         fs::write(native(&game, video), b"new video").unwrap();
-        assert_eq!(sync(&game, &runtime, false).unwrap(), 1);
+        assert_eq!(sync(&game, &runtime, false).unwrap().brought, 1);
         assert_eq!(disable_bootup_videos(&runtime), 1);
         assert_eq!(
             fs::read(native(&runtime, &disabled(video))).unwrap(),
@@ -352,16 +165,28 @@ mod tests {
 
     #[test]
     fn launcher_owned_files_are_never_synced() {
-        let source = BTreeMap::from([
+        let source: Listing = BTreeMap::from([
             ("d3d9.dll".into(), stamp(1, 1)),
             ("DXVK.conf".into(), stamp(1, 1)),
             ("SEGA Rally.exe".into(), stamp(1, 1)),
         ]);
         // with our DXVK: d3d9.dll is ours
-        let managed = plan(&source, &|_| false, &Listing::new(), true);
+        let managed = plan(
+            &source,
+            &|_| false,
+            &Listing::new(),
+            &Srr { dxvk_managed: true },
+        );
         assert_eq!(managed.copy, ["SEGA Rally.exe"]);
         // native Windows: the player's d3d9.dll is a game file like any other
-        let windows = plan(&source, &|_| false, &Listing::new(), false);
+        let windows = plan(
+            &source,
+            &|_| false,
+            &Listing::new(),
+            &Srr {
+                dxvk_managed: false,
+            },
+        );
         assert_eq!(windows.copy, ["SEGA Rally.exe", "d3d9.dll"]);
         for managed in [false, true] {
             assert!(is_owned(MANIFEST, managed) && is_owned(DXVK_MARKER, managed));
@@ -380,12 +205,12 @@ mod tests {
         fs::create_dir_all(&game).unwrap();
         fs::write(game.join("d3d9.dll"), b"player's wrapper").unwrap();
         fs::write(game.join("SEGA Rally.exe"), b"exe").unwrap();
-        assert_eq!(sync(&game, &runtime, true).unwrap(), 1);
+        assert_eq!(sync(&game, &runtime, true).unwrap().brought, 1);
         fs::write(runtime.join("d3d9.dll"), b"dxvk").unwrap();
         fs::write(runtime.join(DXVK_MARKER), b"").unwrap();
         fs::write(game.join("d3d9.dll"), b"changed wrapper").unwrap();
         // the marker alone keeps it ours, even without --linux
-        assert_eq!(sync(&game, &runtime, false).unwrap(), 0);
+        assert_eq!(sync(&game, &runtime, false).unwrap().brought, 0);
         assert_eq!(fs::read(runtime.join("d3d9.dll")).unwrap(), b"dxvk");
         fs::remove_dir_all(game).unwrap();
         fs::remove_dir_all(runtime).unwrap();
@@ -397,79 +222,22 @@ mod tests {
         let runtime = temp("windows-runtime");
         fs::create_dir_all(&game).unwrap();
         fs::write(game.join("d3d9.dll"), b"reshade").unwrap();
-        assert_eq!(sync(&game, &runtime, false).unwrap(), 1);
+        assert_eq!(sync(&game, &runtime, false).unwrap().brought, 1);
         assert_eq!(fs::read(runtime.join("d3d9.dll")).unwrap(), b"reshade");
         fs::write(game.join("d3d9.dll"), b"reshade 2").unwrap();
-        assert_eq!(sync(&game, &runtime, false).unwrap(), 1);
+        assert_eq!(sync(&game, &runtime, false).unwrap().brought, 1);
         assert_eq!(fs::read(runtime.join("d3d9.dll")).unwrap(), b"reshade 2");
         fs::remove_dir_all(game).unwrap();
         fs::remove_dir_all(runtime).unwrap();
     }
 
     #[test]
-    fn missing_relative_and_dotdot_runtimes_inside_the_game_are_refused() {
-        let game = temp("relative-overlap");
-        fs::create_dir_all(&game).unwrap();
-        let game = fs::canonicalize(&game).unwrap();
-        let accepted = resolve(Path::new("../outside-runtime"), &game).unwrap();
-        assert!(accepted.is_absolute());
-        assert_eq!(accepted, game.parent().unwrap().join("outside-runtime"));
-        assert!(!accepted.exists());
-        assert!(check_separate_from(&game, Path::new("child"), &game).is_err());
-        assert!(check_separate_from(&game, Path::new("missing/../child"), &game).is_err());
-        assert!(check_separate_from(&game, &game.join("a/b/../c"), &game).is_err());
-        assert!(!game.join("child").exists());
-        assert!(check_separate_from(&game, Path::new("../outside"), &game).is_ok());
-        fs::remove_dir_all(game).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn an_uncanonicalizable_path_falls_back_to_lexical_resolution() {
-        use std::os::unix::fs::PermissionsExt;
-        let root = temp("locked");
-        fs::create_dir_all(root.join("inner")).unwrap();
-        let root = fs::canonicalize(&root).unwrap();
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o000)).unwrap();
-        let probe = fs::canonicalize(root.join("inner"));
-        if probe
-            .as_ref()
-            .is_err_and(|e| e.kind() != io::ErrorKind::NotFound)
-        {
-            // not NotFound (permission denied): lexical, not an error
-            let resolved = resolve(&root.join("inner/./x/../runtime"), &root).unwrap();
-            assert_eq!(resolved, root.join("inner/runtime"));
-            assert!(
-                check_separate_from(&root.join("inner"), &root.join("inner/rt"), &root).is_err()
-            );
-            assert!(
-                check_separate_from(&root.join("inner"), &temp("lexical-elsewhere"), &root).is_ok()
-            );
-        } // else running as root: nothing is denied, nothing to check
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_symlink_into_the_game_folder_is_refused() {
-        let game = temp("link-game");
-        let links = temp("link-dir");
-        fs::create_dir_all(&game).unwrap();
-        fs::create_dir_all(&links).unwrap();
-        std::os::unix::fs::symlink(&game, links.join("alias")).unwrap();
-        // the runtime does not exist yet; only its parent is a link
-        assert!(check_separate(&game, &links.join("alias").join("runtime")).is_err());
-        fs::remove_dir_all(game).unwrap();
-        fs::remove_dir_all(links).unwrap();
-    }
-
-    #[test]
     fn overlapping_folders_are_refused() {
+        // The SDK check the launcher calls before every sync.
         let game = temp("overlap");
         fs::create_dir_all(&game).unwrap();
-        assert!(check_separate(&game, &game.join("runtime")).is_err());
-        assert!(check_separate(&game, &temp("elsewhere")).is_ok());
+        assert!(rea_launcher::paths::check_separate(&game, &game.join("runtime")).is_err());
+        assert!(rea_launcher::paths::check_separate(&game, &temp("elsewhere")).is_ok());
         fs::remove_dir_all(game).unwrap();
     }
 }

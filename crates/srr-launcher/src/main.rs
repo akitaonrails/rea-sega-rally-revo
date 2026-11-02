@@ -1,17 +1,18 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[cfg(any(windows, test))]
+mod palette;
 #[cfg(windows)]
 mod ui;
-#[cfg(windows)]
-mod win32;
 
 #[cfg(windows)]
 fn main() {
+    use rea_launcher_win32::dialog::{self, Icon};
     let code = match app::run() {
         Ok(code) => code,
         Err(error) => {
             app::log_line(&format!("error: {error}"));
-            win32::message("Sega Rally Revo launcher", &error, true);
+            dialog::message("Sega Rally Revo launcher", &error, Icon::Error);
             1
         }
     };
@@ -27,17 +28,21 @@ fn main() {
 #[cfg(windows)]
 mod app {
     use std::fs;
-    use std::io::Write as _;
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
+    use rea_launcher::log::Log;
+    use rea_launcher::{cfg, fsx, paths};
+    use rea_launcher_win32::dialog::{self, Icon};
+    use rea_launcher_win32::reg::Key;
+    use rea_launcher_win32::{display as screen, gpu, wine, xinput};
     use srr_launcher::config::{self, Settings};
     use srr_launcher::edition;
     use srr_launcher::form::Picture;
     use srr_launcher::gamecfg;
     use srr_launcher::{display, patches, runtime};
 
-    use crate::{ui, win32};
+    use crate::ui;
 
     use runtime::DXVK_MARKER;
 
@@ -49,15 +54,7 @@ mod app {
     }
 
     pub fn log_line(line: &str) {
-        let dir = home();
-        let _ = fs::create_dir_all(&dir);
-        if let Ok(mut file) = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join("launcher.log"))
-        {
-            let _ = writeln!(file, "{line}");
-        }
+        Log::new(home().join("launcher.log")).line(line);
     }
 
     fn settings_path() -> PathBuf {
@@ -106,8 +103,8 @@ mod app {
         let destination = runtime.join("d3d9.dll");
         if !linux {
             if marker.is_file() {
-                let _ = fs::remove_file(destination);
-                let _ = fs::remove_file(marker);
+                let _ = fsx::remove(&destination);
+                let _ = fsx::remove(&marker);
             }
             return Ok(());
         }
@@ -125,10 +122,10 @@ mod app {
             .zip(fs::read(&destination).ok())
             .is_some_and(|(a, b)| a == b);
         if !same {
-            fs::copy(&source, &destination)
+            fsx::install_copy(&source, &destination)
                 .map_err(|error| format!("cannot install DXVK into the runtime: {error}"))?;
         }
-        fs::write(marker, b"d3d9.dll is managed by SRRLauncher\n")
+        fsx::install(&marker, b"d3d9.dll is managed by SRRLauncher\n")
             .map_err(|error| error.to_string())?;
         Ok(())
     }
@@ -138,8 +135,19 @@ mod app {
     }
 
     fn write_exe(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
-        fs::write(dir.join(name), bytes)
+        fsx::install(&dir.join(name), bytes)
             .map_err(|error| format!("cannot write the private copy of {name}: {error}"))
+    }
+
+    /// Writes the game's install values under `HKLM\SOFTWARE\Sega\SEGA
+    /// Rally` (its 32-bit view), or its HKCU VirtualStore twin when native
+    /// Windows refuses HKLM without elevation; 32-bit games read either.
+    fn seed_game_registry(values: &[(&str, String)]) -> Result<&'static str, String> {
+        let (key, place) = Key::machine_or_virtual_store(r"SOFTWARE\Sega\SEGA Rally")?;
+        for (name, value) in values {
+            key.set_string(name, value)?;
+        }
+        Ok(place.describe())
     }
 
     const WINDOW_CLOSED: u32 = 3;
@@ -150,7 +158,7 @@ mod app {
         let settings_path = settings_path();
         let mut cli: Vec<String> = std::env::args().skip(1).collect();
         if take_flag(&mut cli, "--help") {
-            win32::message("Sega Rally Revo launcher", config::USAGE, false);
+            dialog::message("Sega Rally Revo launcher", config::USAGE, Icon::Info);
             return Ok(0);
         }
         let settings_only = take_flag(&mut cli, "--settings");
@@ -169,8 +177,8 @@ mod app {
         }
         // Before any window or game: the settings window's pad navigation
         // and the game both read XInput through Wine's bus.
-        if win32::is_wine() {
-            match win32::wine_controller_baseline(gamecfg::WINEBUS_KEY, &gamecfg::WINEBUS_VALUES) {
+        if wine::is_wine() {
+            match wine::seed_winebus(&gamecfg::WINEBUS_VALUES) {
                 Ok(true) => log_line(
                     "wine: controller bridge seeded (winebus: SDL mapped, hidraw/evdev off)",
                 ),
@@ -179,14 +187,14 @@ mod app {
             }
         }
         if settings_only || (cli.is_empty() && !no_window && !check_only && !setup_only) {
-            if win32::is_wine() {
-                match win32::prefer_gpu_opengl() {
+            if wine::is_wine() {
+                match gpu::prefer_glx() {
                     Ok(true) => log_line("Wine settings window: OpenGL through GLX (UseEGL=N)"),
                     Ok(false) => {}
                     Err(error) => log_line(&format!("warning: {error}")),
                 }
             }
-            let saved = fs::read_to_string(&settings_path).ok();
+            let saved = cfg::read_file(&settings_path).ok().flatten();
             match ui::show(&settings_path, saved.as_deref(), linux) {
                 Ok(ui::Outcome::Play) => {
                     if settings_only {
@@ -205,7 +213,7 @@ mod app {
             }
         }
 
-        let existing = fs::read_to_string(&settings_path).ok();
+        let existing = cfg::read_file(&settings_path).ok().flatten();
         let file_text = existing.as_deref().unwrap_or(config::TEMPLATE);
         let (saved, warnings) = Settings::parse_file(file_text);
         for warning in warnings {
@@ -240,7 +248,7 @@ mod app {
                 .join(" · ")
         ));
         if check_only {
-            win32::message(
+            dialog::message(
                 "Sega Rally Revo launcher",
                 &format!(
                     "Ready to set up.\n\nGame folder: {}\n{}",
@@ -252,7 +260,7 @@ mod app {
                         .collect::<Vec<_>>()
                         .join("\n")
                 ),
-                false,
+                Icon::Info,
             );
             return Ok(0);
         }
@@ -261,17 +269,21 @@ mod app {
             .runtime
             .clone()
             .unwrap_or_else(|| home().join("SegaRally"));
-        runtime::check_separate(&game, &runtime_dir)?;
+        paths::check_separate(&game, &runtime_dir)?;
         if !linux {
             // Back on native Windows after a Linux run: drop our DXVK first,
             // so the sync brings the player's own d3d9.dll (if any) back.
             configure_dxvk(&runtime_dir, false)?;
         }
-        let copied = runtime::sync(&game, &runtime_dir, linux)
+        let report = runtime::sync(&game, &runtime_dir, linux)
             .map_err(|error| format!("cannot prepare {}: {error}", runtime_dir.display()))?;
+        for warning in &report.warnings {
+            log_line(&format!("warning: {warning}"));
+        }
         log_line(&format!(
-            "runtime: {} ({copied} files copied)",
-            runtime_dir.display()
+            "runtime: {} ({} files copied)",
+            runtime_dir.display(),
+            report.brought
         ));
 
         let renamed = runtime::disable_bootup_videos(&runtime_dir);
@@ -337,7 +349,7 @@ mod app {
         };
         log_line(&format!("launch executable: {launch_name}"));
 
-        let screen = win32::screen_size();
+        let screen = screen::screen_size();
         let picture = Picture {
             resolution: settings.resolution,
             aspect: settings.aspect,
@@ -345,10 +357,10 @@ mod app {
             vsync: settings.vsync.unwrap_or(true),
         }
         .resolved(screen);
-        let wine = win32::is_wine();
+        let wine = wine::is_wine();
         let gamescope = std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_some();
         let (width, height) = picture.resolution.unwrap();
-        let mode_supported = wine || win32::display_mode_supported(width, height);
+        let mode_supported = wine || screen::mode_supported(width, height);
         let display_plan = display::plan(
             wine,
             gamescope,
@@ -415,6 +427,11 @@ mod app {
             fs::create_dir_all(dir)
                 .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
         }
+        // Earlier releases built config.ini at `config.ini.srr-tmp`.
+        if let Err(error) = fsx::remove_stale_temps(&paths.saved_games, &[gamecfg::OLD_TEMP_SUFFIX])
+        {
+            log_line(&format!("warning: {error}"));
+        }
         let config_path = paths.saved_games.join("config.ini");
         // Seed only a missing file; a file that cannot be read is the
         // player's and is left exactly as it is.
@@ -424,7 +441,7 @@ mod app {
             picture.quality,
             picture.vsync,
         ) {
-            Ok(bytes) => gamecfg::write_atomic(&config_path, bytes)
+            Ok(bytes) => fsx::write_atomic(&config_path, bytes)
                 .map_err(|error| format!("cannot write {}: {error}", config_path.display()))?,
             Err(error) => log_line(&format!(
                 "warning: cannot read {} ({error}); left unchanged",
@@ -451,9 +468,9 @@ mod app {
         // Registry values the game reads before it will start.
         let runtime_windows = runtime_dir.display().to_string();
         let values = gamecfg::registry_values(&runtime_windows, &settings.effective_language());
-        match win32::seed_game_registry(&values) {
-            Ok(()) => log_line(&format!(
-                "registry: installdir + language {} seeded",
+        match seed_game_registry(&values) {
+            Ok(place) => log_line(&format!(
+                "registry: installdir + language {} seeded ({place})",
                 settings.effective_language()
             )),
             Err(error) => log_line(&format!("warning: {error}")),
@@ -466,7 +483,7 @@ mod app {
         // Any DXVK reads dxvk.conf from the game folder: ours (srr-play,
         // AppImage) or Proton's own when Steam starts the launcher directly.
         if linux || wine {
-            fs::write(
+            fsx::install(
                 &dxvk_conf,
                 gamecfg::dxvk_conf(settings.effective_frame_limit().fps()),
             )
@@ -482,16 +499,13 @@ mod app {
         }
 
         if existing.is_none() || saved.game.as_ref() != Some(&game) {
-            let text = config::set_key(file_text, "game", &game.display().to_string());
-            if let Some(parent) = settings_path.parent() {
-                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-            }
-            fs::write(&settings_path, text)
+            let text = cfg::set_key(file_text, "game", &game.display().to_string());
+            fsx::write_atomic(&settings_path, text)
                 .map_err(|error| format!("cannot save {}: {error}", settings_path.display()))?;
         }
-        if !win32::is_wine() {
+        if !wine::is_wine() {
             let runtime_exe = runtime_dir.join(launch_name);
-            match win32::prefer_fast_gpu(&runtime_exe) {
+            match gpu::prefer_fast_gpu(&runtime_exe) {
                 Ok(true) => log_line("Windows high-performance GPU preference set"),
                 Ok(false) => {}
                 Err(error) => log_line(&format!("warning: {error}")),
@@ -525,7 +539,7 @@ mod app {
             .current_dir(&runtime_dir)
             .status()
             .map_err(|error| format!("cannot start {}: {error}", runtime_exe.display()))?;
-        win32::stop_rumble();
+        xinput::stop_rumble();
         let code = status.code().unwrap_or(1) as u32;
         log_line(&format!("game exited with {code}"));
         Ok(code)
