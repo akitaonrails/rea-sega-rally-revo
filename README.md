@@ -204,6 +204,8 @@ The launcher's switches:
 - `--setup`: prepare the private copy and the game's settings without
   playing.
 - `--download-directx`: download Microsoft's DirectX 9 files, then exit.
+  With the settings window open it exits with code 5 and tells you to use
+  the window's Download button.
 - `--linux`: set by `srr-play` and the AppImage.
 - `--help`: list every option.
 
