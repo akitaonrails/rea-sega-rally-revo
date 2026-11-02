@@ -200,9 +200,9 @@ mod app {
         let pin = directx::pin();
         let root = directx_root();
         if download::installed(&pin, &root).is_some() {
-            let note = "DirectX 9 files: already downloaded";
-            log_line(note);
-            command(note);
+            let note = directx::already_note();
+            log_line(&note);
+            command(&note);
             return Ok(0);
         }
         let job = std::sync::Arc::new(download::Job::default());
@@ -225,11 +225,7 @@ mod app {
         let dir = handle
             .join()
             .map_err(|_| "the download stopped unexpectedly".to_string())??;
-        let note = format!(
-            "DirectX 9 files: {} DLLs in {}; they go into the private copy at the next launch",
-            directx::dlls(&dir).len(),
-            dir.display()
-        );
+        let note = directx::done_note(directx::dlls(&dir).len(), &dir);
         log_line(&note);
         command(&note);
         Ok(0)

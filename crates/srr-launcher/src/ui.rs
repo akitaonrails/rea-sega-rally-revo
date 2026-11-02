@@ -453,6 +453,7 @@ impl Window {
             }
             None => {}
         }
+        widgets::note(ui, directx::LICENCE);
         if state.running() {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }

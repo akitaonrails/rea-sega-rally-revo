@@ -38,6 +38,30 @@ pub fn pin() -> Pin {
 /// The ledger of what the launcher put into the private copy.
 pub const LEDGER: &str = ".srr-components";
 
+/// Microsoft's page for the package (download.microsoft.com serves the
+/// file itself).
+pub const LICENCE_URL: &str = "https://www.microsoft.com/en-us/download/details.aspx?id=8109";
+
+/// The licence line under the window's row and in `--download-directx`
+/// output. The launcher takes the DLLs out without running Microsoft's
+/// installer (DXSETUP), which is what would show the licence.
+pub const LICENCE: &str = "Microsoft's DirectX End-User Runtime licence applies: \
+https://www.microsoft.com/en-us/download/details.aspx?id=8109";
+
+/// `--download-directx` when the files are already there.
+pub fn already_note() -> String {
+    format!("DirectX 9 files: already downloaded.\n{LICENCE}")
+}
+
+/// `--download-directx` after a download: how many DLLs, where.
+pub fn done_note(count: usize, dir: &Path) -> String {
+    format!(
+        "DirectX 9 files: {count} DLLs in {}; they go into the private copy at the next \
+         launch.\n{LICENCE}",
+        dir.display()
+    )
+}
+
 /// What the window shows for the row.
 pub const LABEL: &str = "Microsoft DirectX 9 files";
 
@@ -327,6 +351,16 @@ mod tests {
         assert!(wanted_cab("Apr2005_d3dx9_25_x86.cab"));
         assert!(!wanted_cab("Apr2005_d3dx9_25_x64.cab"));
         assert!(!wanted_cab("APR2007_d3dx10_33_x86.cab"));
+    }
+
+    #[test]
+    fn the_licence_line_names_microsofts_runtime_licence_and_links_it() {
+        assert!(LICENCE.starts_with("Microsoft's DirectX End-User Runtime licence applies"));
+        assert!(LICENCE.ends_with(LICENCE_URL));
+        assert!(already_note().ends_with(LICENCE));
+        let done = done_note(30, Path::new("dx"));
+        assert!(done.starts_with("DirectX 9 files: 30 DLLs in dx;"));
+        assert!(done.ends_with(LICENCE));
     }
 
     #[test]

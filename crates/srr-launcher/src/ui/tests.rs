@@ -231,6 +231,10 @@ fn the_directx_row_downloads_on_request_only() {
     let (mut ui, fake, _) = open(None, true, "directx");
     assert_eq!(fake.downloads.get(), 0, "nothing without the button");
     assert!(
+        ui.query_by_label(srr_launcher::directx::LICENCE).is_some(),
+        "the licence line sits on the row"
+    );
+    assert!(
         ui.query_by_label_contains("Microsoft DirectX 9 files, 100 MB")
             .is_some()
     );

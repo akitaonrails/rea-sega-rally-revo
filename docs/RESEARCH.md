@@ -203,7 +203,7 @@ Windows Update never installs them.
   Runtime (`directx_Jun2010_redist.exe`, today served re-signed:
   100,275,120 bytes, SHA-256 `053f76dc…dbf89c73b`; winetricks still pins
   the older signature `8746ee1a…f011780c0d`). Its licence text (in its
-  `dsetup32.dll`, shown at install) — *Microsoft Software License Terms,
+  `dsetup32.dll`, shown by its installer DXSETUP) — *Microsoft Software License Terms,
   Microsoft DirectX End User Runtime* — grants "install and use any number
   of copies … on your devices" and forbids to "publish the software for
   others to copy" and to "transfer the software … to any third party".
@@ -222,7 +222,11 @@ Windows Update never installs them.
   player's request, pinned by SHA-256; the player's own launcher takes the
   32-bit `d3dx9_24…43.dll` and `D3DCompiler_*.dll` out of its cabinets
   (the `cab` crate) and puts them next to the game in the private copy
-  (no admin, nothing in System32), with `n,b` Wine overrides. Which
+  (no admin, nothing in System32), with `n,b` Wine overrides. DXSETUP
+  never runs, so it never shows the licence; the window's DirectX row and
+  the `--download-directx` output carry the line "Microsoft's DirectX
+  End-User Runtime licence applies" with a link to Microsoft's page for
+  the package (`microsoft.com/en-us/download/details.aspx?id=8109`). Which
   `d3dx9_NN` the game imports was not checked (no executable on the
   analysis host); all versions are extracted (~70 MB).
 - **DirectPlay** is not in that package (winetricks takes it from the

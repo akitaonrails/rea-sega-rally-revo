@@ -40,7 +40,7 @@ Add a row before bundling anything new.
 
 | Component | Licence | Source | Why not bundled |
 | --- | --- | --- | --- |
-| Microsoft DirectX End-User Runtime, June 2010 (`directx_Jun2010_redist.exe`, 100,275,120 bytes, SHA-256 `053f76dcbb28802e23341b6a787e3b0791c0fa5c8d4d011b1044172dbf89c73b`); the launcher keeps its 32-bit `d3dx9_*.dll` and `D3DCompiler_*.dll` | Microsoft Software License Terms, DirectX End User Runtime (shown by the package; it lets the player install and use it, and forbids publishing it for others to copy) | download.microsoft.com (pinned in `crates/srr-launcher/src/directx.rs`) | the runtime's licence forbids redistribution; the DirectX SDK's redistribution rights require Microsoft's DirectSetup installer (see `docs/RESEARCH.md`) |
+| Microsoft DirectX End-User Runtime, June 2010 (`directx_Jun2010_redist.exe`, 100,275,120 bytes, SHA-256 `053f76dcbb28802e23341b6a787e3b0791c0fa5c8d4d011b1044172dbf89c73b`); the launcher keeps its 32-bit `d3dx9_*.dll` and `D3DCompiler_*.dll` | Microsoft Software License Terms, DirectX End User Runtime (inside the package; it lets the player install and use the software, and forbids publishing it for others to copy). The launcher takes the DLLs out of the cabinets without running the package's installer (DXSETUP), which is what would show the terms, so the window's DirectX row and `--download-directx` say "Microsoft's DirectX End-User Runtime licence applies" with a link to Microsoft's page for the package | download.microsoft.com (pinned in `crates/srr-launcher/src/directx.rs`) | the runtime's licence forbids redistribution; the DirectX SDK's redistribution rights require Microsoft's DirectSetup installer (see `docs/RESEARCH.md`) |
 
 ## Owner decisions
 

@@ -16,6 +16,10 @@
   each launch. If they cannot be put there (a full disk, a locked file),
   `launcher.log` gets a warning and the game starts without them instead
   of the launcher refusing to play.
+- The DirectX 9 row and `--download-directx` say that Microsoft's DirectX
+  End-User Runtime licence applies, with a link to Microsoft's page for
+  the package. The launcher unpacks the files without running Microsoft's
+  installer, which is where Microsoft shows that licence.
 - **One launcher at a time.** Starting the launcher again while its window
   is open brings that window forward. While the game is running from it,
   a second start says so and doesn't start another game (exit code 5).
