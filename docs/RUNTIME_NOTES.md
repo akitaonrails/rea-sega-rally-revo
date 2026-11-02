@@ -404,3 +404,37 @@ Not exercised here: the AppImage (not rebuilt), Steam's Proton, native
 Windows, the Settings window at Wine DPI 120–192, a driven race with a
 pad, the game at more than 60 fps in a race (the stutter fix with
 `frame_limit 120/off`).
+
+## 2026-11-02 — the game makes its own save files (owner decision)
+
+The launcher no longer seeds empty `SEGA Rally.dat` / `SR_RANKTABLES.DAT`
+(`7bb11e7`) and removes zero-byte copies left by earlier releases
+(`ec2877e`). Same headless harness as the entry above (new throwaway
+prefix, `--setup` from the owner's full rip, gamescope headless 1920x1080,
+`env -i`, XTest keys).
+
+- **Fresh profile.** After `--setup`, `Saved Games` and
+  `Shared Data/{Rank Table,Ghosts}` exist and hold no `.dat` file. First
+  launch: title → Enter → "Saving Data" → "Would you like to adjust your
+  brightness setting?" (the game's own first-run question). There was no
+  "Player Progress Data Corrupt" and no "Local Leaderboard Corrupt". The
+  game wrote `SEGA Rally.dat` (23,696 bytes) and `SR_RANKTABLES.DAT`
+  (464,008 bytes) itself. VERIFIED. Evidence: `.work/realgame/logs/fresh.log`,
+  `keep/saves-fresh-0{2,3}.jpg`.
+- **No main-menu crash** (the reason the seed existed, RESEARCH #3). Second
+  launch on that profile: main menu (Championship), back to the title,
+  the attract race (Alpine), then Championship → Premier → Amateur League
+  → AZA Challenge → car selection. The game stayed up for 2.5 minutes,
+  until the supervisor closed it. VERIFIED. Evidence: `logs/menu2.log`,
+  `keep/saves-menu2-0{3,8}.jpg`.
+- **Upgrade over the old empty seeds.** Both files truncated to 0 bytes as
+  earlier releases left them, then a launch: `launcher.log` says "saves:
+  removed 2 empty save file(s) left by an earlier release; the game
+  creates them". There was no corrupt prompt (only the brightness
+  question). The game recreated both files (23,696 / 464,008 bytes) and
+  went from Championship through car and livery selection to the Safari
+  race start ("Press ENTER to Start"), without crashing. VERIFIED. Evidence:
+  `logs/upgrade.log`, `keep/saves-up-{01,12}.jpg`.
+- Non-empty saves are left alone: covered by the host test
+  `the_old_empty_seeds_go_and_real_saves_stay`. The real non-empty saves
+  above were kept across the second and third launches.
