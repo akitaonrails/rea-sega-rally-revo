@@ -3,7 +3,8 @@ linker = "i686-w64-mingw32-gcc"
 # GNU ld 2.47 mis-merges the per-crate raw-dylib kernel32 import groups:
 # some import slots end up outside every import descriptor, never get
 # resolved, and the launcher jumps into data on its first call to e.g.
-# GetModuleHandleW. LLD links them correctly. Checked by tests/imports.rs.
+# GetModuleHandleW. LLD links them correctly. CI checks both with the
+# SDK's packaging/check-lld.sh and check-imports.sh (launcher-ci).
 rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 
 [target.x86_64-pc-windows-gnu]

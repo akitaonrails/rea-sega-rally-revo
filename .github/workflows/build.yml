@@ -17,7 +17,7 @@ permissions:
 jobs:
   # The shared rea-launcher-sdk CI: formatting, host tests, cargo audit and
   # deny, sdk/ drift, shell syntax and the Linux helper tests, Windows-target
-  # clippy, the release build, the import-resolution test, packaging and the
+  # clippy, the release build, the lld and import checks, packaging and the
   # package allowlist.
   ci:
     uses: akitaonrails/rea-launcher-sdk/.github/workflows/launcher-ci.yml@v0.3.0
@@ -26,7 +26,6 @@ jobs:
       clippy-args: ""
       wine-tests: true
       shell-tests: linux/tests/*.sh packaging/tests/*.sh
-      imports-test: SRR_LAUNCHER_EXE="$REA_RELEASE_DIR/SRRLauncher.exe" cargo test --locked --test imports -- --ignored
       package-command: |
         sh packaging/package.sh "$REA_VERSION_NAME" dist "$REA_RELEASE_DIR"
         # The AppImage carries DXVK where SRRLauncher.exe looks for it.

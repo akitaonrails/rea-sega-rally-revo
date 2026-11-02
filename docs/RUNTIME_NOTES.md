@@ -53,8 +53,8 @@ Bugs found by these runs, all fixed with regression tests:
    raw-dylib `kernel32` import groups wrongly: `Sleep`, `CloseHandle`,
    `GetModuleHandleA/W` and `LoadLibraryW` sat outside every import
    descriptor, so the first `is_wine()` call jumped into `.rdata`. Now
-   linked with LLD (`.cargo/config.toml`); `tests/imports.rs` checks every
-   built exe in CI.
+   linked with LLD (`.cargo/config.toml`); CI checks every built exe with
+   the SDK's `packaging/check-imports.sh` (it replaced `tests/imports.rs`).
 2. **Stutter fix refused the clean exe.** `EDITIONS` held copies of the
    edition statics, so the address comparison in `main.rs` never matched
    and every launch failed with "the private SSE1 copy is not the clean
