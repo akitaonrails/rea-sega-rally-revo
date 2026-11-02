@@ -303,3 +303,104 @@ Pending, in the real game (STANDARDS "Clean exit, single instance"):
   `install_with`: progress through Unpacking, the DLLs in
   `directx\directx_Jun2010_redist\` (was `directx\d3dx9\` in unreleased
   builds; an old folder there is now unused and can be deleted), Remove.
+
+## 2026-11-02 — real-game verification pass (headless, owner's full rip)
+
+Release build `SRRLauncher.exe` (i686, lld) plus `linux/srr-play` and the
+pinned DXVK 3.1.1 `d3d9.dll`, against the owner's full rip (read-only,
+reached as Wine drive `D:` through a symlink). Everything ran inside the
+`gaming` distrobox under a supervisor with a finite timeout
+(`.work/realgame/sv.sh`): a throwaway prefix, `HOME` and XDG dirs under
+`.work/realgame/`, a scrubbed environment (`env -i` plus only the test's
+variables), `gamescope --backend headless` on the RTX 5090 (1280x720 to
+3840x1080), audio on a private PipeWire null sink (`srr_rg_null`,
+unloaded afterwards). After every run the supervisor listed the test's
+processes by an environment marker and `WINEPREFIX` (plus `Z` entries by
+name), measured how long each kind took to disappear after the quit
+action, then signalled exact PIDs (TERM, then KILL). Evidence (logs,
+JPEG screenshots) is in `.work/realgame/{logs,keep}/`.
+
+Harness lessons (not launcher bugs):
+
+- **The game shows nothing until it gets input.** In headless gamescope
+  the window never gets focus, and the game neither presents a frame nor
+  advances (black screen, ~0.6 CPU ticks/s) until an input event arrives:
+  one click plus a Shift key press and it runs (legal screen, title,
+  attract demo). On a real desktop focus is given at start.
+- `gamescopectl screenshot` writes the file asynchronously: wait before
+  reading it.
+- gamescope's environment can't be read (file capabilities); track it as
+  `timeout`'s child. gamescope 3.17 often segfaults on exit (exit 139).
+- A TERM to the game can leave a defunct leader with live threads (seen
+  once: 33 threads in `S`); a KILL to the thread group removes it.
+  After the isolated-desktop run, gamescope, Xwayland and two explorer
+  threads sat in `D` (`drm_release`, NVIDIA driver) for about a minute
+  after KILL, then went away by themselves.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Fresh runtime, `--setup` | VERIFIED: 1418 files copied, pacer applied (private SSE1 = `4c08c1de…f1ad08f2520`), config.ini/save/rank table/registry/DXVK written | `logs/setup.log`, `launcher.log` |
+| `real_game` test (`SRR_GAME_DIR=… cargo test real_game -- --ignored`) | VERIFIED (1 passed) | terminal |
+| Look Modern (1920x1080 screen) | VERIFIED: config.ini 1920x1080 High vsync, title and attract demo render through DXVK on the RTX 5090 | `keep/perf-60-030.jpg` |
+| Look Original 2007 | VERIFIED (files): config.ini 1280x720, Normal, vsync; DXVK swapchain 1280x720. The screenshot is black (taken before the input fix above) | `logs/look-original.log` |
+| Look Steam Deck | VERIFIED: config.ini 1280x800 High, DXVK buffer 1280x800, renders | `keep/look-steamdeck-030.jpg` |
+| Stutter fix off | VERIFIED: `SEGA Rally.exe` (NoDVD, pristine) launched | `logs/diag-nopacer.log` |
+| 21:9 (2560x1080) | VERIFIED (files): aspect 21:9 set on both exes, the patched SSE1 still runs; **screenshot for the owner** (is the picture unstretched?) | `keep/opt-219-120-fr-040.jpg` |
+| 32:9 (3840x1080) | VERIFIED (files): aspect 32:9, runs; **screenshot for the owner** | `keep/opt-329-off-de-040.jpg` |
+| Frame limit 60 / 120 / off | VERIFIED (gamescope at 240 Hz, DXVK HUD): 60.0, 119.9–120.0, uncapped (610–670 fps in the attract demo, ~4000 on the title) | `keep/perf-*.jpg` |
+| Vsync off | VERIFIED: config.ini `VSync=0`, frame rate far above the 240 Hz refresh | `keep/perf-off-040.jpg` |
+| Languages | VERIFIED French, German, Spanish, Italian (title text); Polish FAILED, then fixed (below) and VERIFIED ("WCIŚNIJ PRZYCISK START") | `keep/opt-*`, `keep/lang-*.jpg` |
+| config.ini over the game's own file | VERIFIED: the game's keys (e.g. `ResolutionFilter`, `[GameController]`) kept, set options rewritten, unset quality kept the game's value | config.ini after the runs |
+| NVIDIA ICD pin (srr-play) | VERIFIED: `GPU: VK_DRIVER_FILES=…nvidia_icd.json`; DXVK picks the RTX 5090 | `logs/srrplay-stop.log` |
+| `WINEDLLOVERRIDES` reaches the game | **FAILED** (see bugs): DXVK loads only because Wine's default order already prefers the app-folder `d3d9.dll` | `logs/dx-*.log` |
+| `--help`, `--check`, `--check` on a wrong folder (Wine) | VERIFIED: usage exit 0; "Ready to play" exit 0; plain message with the issue link, exit 1 | `logs/cli.log` |
+| `--download-directx` | VERIFIED: Microsoft's package downloaded into the prefix, 22 DLLs in `directx\directx_Jun2010_redist`, copied into the private copy at the next launch | `logs/cli.log`, `launcher.log` |
+| Game's own Quit (Escape at the title → "Are you sure you want to exit?" → Enter) | VERIFIED: game, launcher, wineserver gone in 0.08 s, gamescope 0.4 s | `logs/ownquit.log`, `keep/ownquit-confirm.jpg` |
+| Close request (`wine cmd /c taskkill /im …`, no `/f`) | VERIFIED on a running game (8 runs): game and launcher 0.36–0.41 s, wineserver ~1 s, all ≤ 1.3 s (≤ 6.2 s once, gamescope teardown). A game still waiting for its first input ignores it | `logs/opt-*.log`, `logs/lang-it.log`, `logs/look-original.log` |
+| `srr-play stop` (detached `--play`, `status` = running) | VERIFIED: all gone in 0.66 s | `logs/srrplay-stop.log` |
+| SIGINT / SIGTERM to srr-play in waiting mode (`SRR_WAIT=1`, as the AppImage) | VERIFIED: helper exits 143, all gone in 1.6 s | `logs/srrplay-sig*.log` |
+| gamescope killed (TERM) | Launcher and wineserver gone at once; the game was left as a defunct leader and gamescope hung until the supervisor's TERM. Only relevant inside gamescope (srr-play uses none) | `logs/lang-pl-killgs.log` |
+| Second launcher start while the game runs | VERIFIED: "Sega Rally Revo is already running from this launcher. Quit the game first…", exit 5, still one game; log `another launcher is running: Busy` (the game's window title does not collide with the launcher's) | `logs/second-launcher.log` |
+| Second `srr-play --play` while the game runs | VERIFIED: "already running", exit 0, no second game | `logs/second-srrplay.log` |
+| winebus: pad appears once, steering/pedals | NOT CHECKABLE HEADLESS: needs the 8BitDo pad; a person must open the game's controller options through srr-play, the AppImage and Proton | — |
+| Settings window (Wine, private Xvfb 2560x1440, 96 DPI) | Captured with the real game folder; README screenshots retaken | `docs/images/launcher-*.jpg` |
+
+Bugs found:
+
+1. **Polish menus showed English** (fixed, `c1d3c5e`). The full rip's
+   readme: Polish needs `sku=polish`; the launcher always wrote `Europe`.
+2. **The game's `WINEDLLOVERRIDES` is not honoured** (open). The launcher
+   logs `wine: DLL overrides d3d9,d3dcompiler_42,…,d3dx9_43=n,b` and sets
+   it on the game's command, but the game's Unix environment has no
+   `WINEDLLOVERRIDES` and Wine loads its builtin `d3dx9_35` even though
+   Microsoft's DLL is in the private copy — in both the gamescope
+   (direct) and isolated-desktop (`explorer /desktop`) paths. The same
+   string exported in the Unix environment loads the native DLL; with no
+   override at all the result matches the launcher's (app-folder
+   `d3d9.dll` native by Wine's default, `d3dx9_35` builtin). So the
+   downloaded DirectX files are not used under Wine, and DXVK works only
+   thanks to Wine's default order. The game ran fine with Wine's builtin
+   D3DX9 in every run. Candidate fixes: `srr-play` exports the overrides
+   before starting the launcher (not Proton), or per-executable
+   `HKCU\Software\Wine\AppDefaults\<exe>\DllOverrides` registry values
+   (Proton too). This touches how every rea launcher passes overrides, so
+   it goes to the SDK first.
+3. **"Player Progress Data Corrupt" and "Local Leaderboard Corrupt" on a
+   fresh profile** (open, by design so far). The launcher seeds an empty
+   `SEGA Rally.dat` and `SR_RANKTABLES.DAT` (RESEARCH #3, against the
+   main-menu crash); the game calls both corrupt and offers to overwrite
+   them. Answering Yes creates valid files (23,696 bytes and 464 KB) and
+   the prompts do not come back. Worth an owner decision: keep the
+   prompts, or seed the files the game writes.
+
+Performance figures: an LLM was running on the same GPU during the first
+runs, so the frame rates measured then were discarded; the figures above
+come from three runs after the GPU was free. The GPU showed 41 % before
+the first of them, and another agent's game test started during the last
+(uncapped) run, so treat the uncapped figures as a lower bound; the 60
+and 120 caps were reached exactly.
+
+Not exercised here: the AppImage (not rebuilt), Steam's Proton, native
+Windows, the Settings window at Wine DPI 120–192, a driven race with a
+pad, the game at more than 60 fps in a race (the stutter fix with
+`frame_limit 120/off`).
