@@ -33,6 +33,12 @@
 - The stutter fix checks its result against the known patched SHA-256
   before writing the private exe, and refuses (writing nothing) on a
   mismatch.
+- The runtime folder is refused inside the game folder even before it
+  exists or when reached through `..` or a symlink (the nearest existing
+  parent is resolved).
+- Syncing the game folder never overwrites the launcher's own runtime
+  files: a `d3d9.dll` or `dxvk.conf` in the game folder (not part of the
+  v4.0.6.0 game) is no longer copied over the installed DXVK.
 
 ## v0.1.1 - 2026-11-02
 
