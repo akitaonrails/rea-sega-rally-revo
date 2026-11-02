@@ -330,14 +330,10 @@ pub fn template() -> String {
 /// `--help`: the options from the table, then the switches.
 pub fn usage() -> String {
     format!(
-        "SRRLauncher {}\n\nSRRLauncher [options]\n\n{}{}\n\
+        "SRRLauncher {}\n\nSRRLauncher [options]\n\n{}\n\
          Options override launcher.cfg for one run; only --game is remembered.\n",
         env!("CARGO_PKG_VERSION"),
-        spec::usage(OPTIONS, KeyStyle::Underscore),
-        SWITCH_HELP
-            .iter()
-            .map(|(flag, text)| format!("  {flag:18}  {text}\n"))
-            .collect::<String>()
+        spec::usage_with(OPTIONS, KeyStyle::Underscore, &SWITCH_HELP)
     )
 }
 

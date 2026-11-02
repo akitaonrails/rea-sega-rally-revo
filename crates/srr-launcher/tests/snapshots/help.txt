@@ -11,12 +11,12 @@ SRRLauncher [options]
   --frame-limit 60|120|off                                 Frame limit
   --stutter-fix on|off                                     Stutter fix
   --language English|French|German|Spanish|Italian|Polish  Language
-  --check             check the game folder and exit (exit code 1 if it cannot play)
-  --setup             prepare the private copy and the game's settings, without playing
-  --download-directx  download Microsoft's DirectX 9 files into the private copy, then exit
-  --no-window         play with the saved settings, no launcher window
-  --settings          only show the settings window
-  --linux             running under srr-play or the AppImage: install DXVK into the copy
-  --help              show this help
+  --check                                                  check the game folder and exit (exit code 1 if it cannot play)
+  --setup                                                  prepare the private copy and the game's settings, without playing
+  --download-directx                                       download Microsoft's DirectX 9 files into the private copy, then exit
+  --no-window                                              play with the saved settings, no launcher window
+  --settings                                               only show the settings window
+  --linux                                                  running under srr-play or the AppImage: install DXVK into the copy
+  --help                                                   show this help
 
 Options override launcher.cfg for one run; only --game is remembered.
