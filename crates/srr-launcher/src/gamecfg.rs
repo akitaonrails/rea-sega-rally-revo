@@ -3,13 +3,16 @@
 //! has to run.
 //!
 //! `config.ini` lives in `Documents\SEGA Rally\Saved Games\config.ini`.
-//! Only the `[Graphics]` keys this launcher manages are touched; existing
-//! `[Audio]` and `[GameController]` sections (which hold the player's
-//! controller GUID and mapping) are preserved verbatim, byte for byte in
-//! any encoding (the SDK's `ini` module). The caller replaces the real file
-//! atomically (`rea_launcher::fsx::write_atomic`).
+//! A missing file is seeded once, complete. After that each launch writes
+//! only the `[Graphics]` keys of the options set in `launcher.cfg`
+//! (resolution, quality, vsync), and records them (`ini::Owned`): when an
+//! option goes back to unset, a key is restored only while it still holds
+//! the launcher's value, so a choice made in the game's own menu stays.
+//! `[Audio]`, `[GameController]` (the controller GUID and mapping),
+//! comments and unknown keys are kept byte for byte, in any encoding (the
+//! SDK's `ini` module). The caller replaces the real file atomically.
 
-use rea_launcher::ini::Ini;
+use rea_launcher::ini::{self, Ini, Owned};
 use rea_launcher::wine;
 
 use crate::config::Quality;
@@ -22,8 +25,6 @@ use crate::config::Quality;
 pub struct QualityValues(pub [i32; 10]);
 
 pub fn quality_values(quality: Quality) -> QualityValues {
-    // GraphicQuality, Shadow, Reflection, Track, Texture, Shader,
-    // DrawDistance, Particle, RearViewMirror, Mud
     match quality {
         Quality::Normal => QualityValues([2, 2, 2, 2, 2, 2, 2, 2, 2, 2]),
         Quality::High => QualityValues([3, 2, 2, 3, 2, 1, 2, 2, 2, 1]),
@@ -31,14 +32,30 @@ pub fn quality_values(quality: Quality) -> QualityValues {
     }
 }
 
-/// The `[Graphics]` keys this launcher manages, in the game's order.
+/// The ten `[Graphics]` keys of a quality preset, in the game's order.
+pub const QUALITY_KEYS: [&str; 10] = [
+    "GraphicQuality",
+    "ShadowQuality",
+    "ReflectionQuality",
+    "TrackQuality",
+    "TextureQuality",
+    "ShaderQuality",
+    "DrawDistanceQuality",
+    "ParticleQuality",
+    "RearViewMirrorQuality",
+    "MudQuality",
+];
+
+pub const SECTION: &str = "Graphics";
+
+/// The complete `[Graphics]` section of a first run, in the game's order.
 pub fn graphics_keys(
     resolution: (u32, u32),
     quality: Quality,
     vsync: bool,
-) -> [(&'static str, String); 25] {
+) -> Vec<(&'static str, String)> {
     let values = quality_values(quality);
-    [
+    let mut keys = vec![
         ("AdapterOrdinal", "0".to_string()),
         ("RenderDevice", "Hardware".to_string()),
         ("AdapterFormat", "X8R8G8B8".to_string()),
@@ -49,116 +66,119 @@ pub fn graphics_keys(
         ("AntiAliasingLevel", "0".to_string()),
         ("MultisampleType", "0".to_string()),
         ("MultisampleQuality", "0".to_string()),
-        ("GraphicQuality", values.0[0].to_string()),
-        ("ShadowQuality", values.0[1].to_string()),
-        ("ReflectionQuality", values.0[2].to_string()),
-        ("TrackQuality", values.0[3].to_string()),
-        ("TextureQuality", values.0[4].to_string()),
-        ("ShaderQuality", values.0[5].to_string()),
-        ("DrawDistanceQuality", values.0[6].to_string()),
-        ("ParticleQuality", values.0[7].to_string()),
-        ("RearViewMirrorQuality", values.0[8].to_string()),
-        ("MudQuality", values.0[9].to_string()),
-        ("VSync", if vsync { "1" } else { "0" }.to_string()),
+    ];
+    keys.extend(
+        QUALITY_KEYS
+            .into_iter()
+            .zip(values.0.map(|v| v.to_string())),
+    );
+    keys.extend([
+        ("VSync", vsync_value(vsync).to_string()),
         ("RefreshRate", "60".to_string()),
         ("ShaderVersion", "3".to_string()),
         ("ResolutionFilter", "1".to_string()),
         ("RunWindowed", "0".to_string()),
-    ]
+    ]);
+    keys
 }
 
-/// Render the `[Graphics]` section this launcher manages.
-pub fn graphics_section(resolution: (u32, u32), quality: Quality, vsync: bool) -> String {
-    graphics_keys(resolution, quality, vsync)
+fn vsync_value(vsync: bool) -> &'static str {
+    if vsync { "1" } else { "0" }
+}
+
+/// Full config.ini for a first run (no file exists yet): `[Audio]` and
+/// `[GameController]` as the original tool wrote them, then `[Graphics]`.
+pub fn seed_config(resolution: (u32, u32), quality: Quality, vsync: bool) -> String {
+    let graphics: Vec<String> = graphics_keys(resolution, quality, vsync)
         .iter()
         .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// The `[Audio]` and `[GameController]` sections seeded on first run, when
-/// no config.ini exists yet. Once the file exists these sections are the
-/// player's (they hold the controller GUID and mapping) and are never
-/// rewritten.
-pub fn seed_sections() -> String {
-    concat!(
-        "[Audio]\n",
-        "DriverGUID=00000000-0000-0000-0000-000000000000\n",
-        "Quality=3\n",
-        "SoftwareEmulation=0\n",
-        "\n",
-        "[GameController]\n",
-        "GUID=\n",
-        "Mapping=000100010000000100000000-0000-0000-0000-0000000000000000000E000F001200130014000200030017001800010000\n"
+        .collect();
+    format!(
+        "[Audio]\n\
+         DriverGUID=00000000-0000-0000-0000-000000000000\n\
+         Quality=3\n\
+         SoftwareEmulation=0\n\
+         \n\
+         [GameController]\n\
+         GUID=\n\
+         Mapping=000100010000000100000000-0000-0000-0000-0000000000000000000E000F001200130014000200030017001800010000\n\
+         \n\
+         [Graphics]\n{}\n",
+        graphics.join("\n")
     )
-    .to_string()
 }
 
-/// Sets our managed `[Graphics]` keys in `ini` (`key=value`, the game's
-/// spelling): keys are updated in place whatever their case or spacing,
-/// missing keys are added to the section, a missing section is appended.
-/// `[Audio]`, `[GameController]` and every comment or unknown key stay
-/// exactly as they were.
-fn set_graphics(ini: &mut Ini, resolution: (u32, u32), quality: Quality, vsync: bool) {
-    for (key, value) in graphics_keys(resolution, quality, vsync) {
-        ini.set("Graphics", key, &value);
+/// The picture options as `launcher.cfg` has them: `None` is unset (the
+/// game's value stays).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Graphics {
+    pub resolution: Option<(u32, u32)>,
+    pub quality: Option<Quality>,
+    pub vsync: Option<bool>,
+}
+
+/// Each option's `[Graphics]` keys and values: `Some` writes them, `None`
+/// releases them.
+fn owned_keys(graphics: &Graphics) -> Vec<(&'static str, Option<String>)> {
+    let mut keys = Vec::new();
+    let resolution = graphics.resolution;
+    keys.push((
+        "HorizontalResolution",
+        resolution.map(|(width, _)| width.to_string()),
+    ));
+    keys.push((
+        "VerticalResolution",
+        resolution.map(|(_, height)| height.to_string()),
+    ));
+    let values = graphics.quality.map(quality_values);
+    for (i, key) in QUALITY_KEYS.into_iter().enumerate() {
+        keys.push((key, values.map(|values| values.0[i].to_string())));
     }
+    keys.push((
+        "VSync",
+        graphics.vsync.map(|on| vsync_value(on).to_string()),
+    ));
+    keys
 }
 
-/// [`update_config_bytes`] on text.
-pub fn update_config(
-    existing: &str,
-    resolution: (u32, u32),
-    quality: Quality,
-    vsync: bool,
-) -> String {
-    let mut ini = Ini::parse(existing).tight();
-    set_graphics(&mut ini, resolution, quality, vsync);
-    ini.to_text().expect("parsed from text")
-}
-
-/// Our managed `[Graphics]` lines merged into the file's raw bytes,
-/// changing nothing else. A file that is not UTF-8 is edited one byte per
-/// character, so a controller name or path in any encoding is written back
-/// byte for byte; a leading UTF-8 BOM is set aside, so `[Graphics]` on the
-/// first line still matches, and kept.
-pub fn update_config_bytes(
-    existing: &[u8],
-    resolution: (u32, u32),
-    quality: Quality,
-    vsync: bool,
-) -> Vec<u8> {
-    let mut ini = Ini::from_bytes(existing).tight();
-    set_graphics(&mut ini, resolution, quality, vsync);
-    ini.to_bytes()
-}
-
-/// What to write to config.ini given the result of reading it: the
-/// updated file, a fresh seed only when it does not exist, and the read
-/// error otherwise (a file that cannot be read is the player's and must not
-/// be replaced by a seed that would lose `[Audio]`/`[GameController]`).
+/// The new config.ini given the result of reading it. A missing file is
+/// seeded with `seed` (the effective values); an existing one gets only
+/// the keys of the options in `graphics`, byte for byte otherwise; a file
+/// that cannot be read is the player's and is not replaced (the error
+/// comes back). `owned` is the record of what the launcher wrote.
 pub fn next_config(
     read: std::io::Result<Vec<u8>>,
-    resolution: (u32, u32),
-    quality: Quality,
-    vsync: bool,
+    seed: ((u32, u32), Quality, bool),
+    graphics: &Graphics,
+    owned: &mut Owned,
 ) -> std::io::Result<Vec<u8>> {
-    match read {
-        Ok(existing) => Ok(update_config_bytes(&existing, resolution, quality, vsync)),
+    let existing = match read {
+        Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(seed_config(resolution, quality, vsync).into_bytes())
+            seed_config(seed.0, seed.1, seed.2).into_bytes()
         }
-        Err(error) => Err(error),
+        Err(error) => return Err(error),
+    };
+    let mut ini = Ini::from_bytes(&existing).tight();
+    for (key, value) in owned_keys(graphics) {
+        match value {
+            Some(value) => ini::set_owned(&mut ini, owned, SECTION, key, &value),
+            None => {
+                ini::release(&mut ini, owned, SECTION, key);
+            }
+        }
     }
+    Ok(ini.to_bytes())
 }
 
-/// Full config.ini for a first run (no file exists yet).
-pub fn seed_config(resolution: (u32, u32), quality: Quality, vsync: bool) -> String {
-    format!(
-        "{}\n[Graphics]\n{}\n",
-        seed_sections(),
-        graphics_section(resolution, quality, vsync)
-    )
+/// The resolution a config.ini holds, if both keys are numbers.
+pub fn resolution_in(config: &[u8]) -> Option<(u32, u32)> {
+    let ini = Ini::from_bytes(config);
+    let number = |key| ini.get(SECTION, key)?.trim().parse::<u32>().ok();
+    Some((
+        number("HorizontalResolution")?,
+        number("VerticalResolution")?,
+    ))
 }
 
 /// The two bootup logo videos, renamed out of the way in the runtime copy:
@@ -197,31 +217,59 @@ pub fn dxvk_conf(limit: Option<u32>) -> String {
     }
 }
 
-/// The Wine DLL rule the game needs when the launcher installed DXVK's
-/// `d3d9.dll` next to it: native first, so neither Wine's builtin d3d9 nor a
-/// stray `d3d9=b` in the environment replaces DXVK.
-pub const DXVK_OVERRIDE: &str = "d3d9=n,b";
-
-/// `WINEDLLOVERRIDES` for the game: our `d3d9` rule first when DXVK is
-/// installed, every unrelated rule the caller set kept (the AppImage's
-/// `mscoree,mshtml=` among them), and only the `d3d9` names we own
-/// replaced (`wine::merge_dll_overrides`). Without DXVK the caller's value
-/// is passed through unchanged.
-pub fn wine_overrides(existing: Option<&str>, dxvk: bool) -> Option<String> {
-    if !dxvk {
+/// `WINEDLLOVERRIDES` for the game: `d3d9=n,b` when the launcher
+/// installed DXVK, and `native` (the DirectX 9 files the player downloaded
+/// into the private copy, without `.dll`) as `n,b` too, so Wine loads them
+/// instead of its own. Every unrelated rule the caller set is kept (the
+/// AppImage's `mscoree,mshtml=` among them) and only the names we own are
+/// replaced (`wine::merge_dll_overrides`). With nothing of ours the
+/// caller's value is passed through unchanged.
+pub fn wine_overrides(existing: Option<&str>, dxvk: bool, native: &[String]) -> Option<String> {
+    let mut names: Vec<&str> = Vec::new();
+    if dxvk {
+        names.push("d3d9");
+    }
+    names.extend(native.iter().map(String::as_str));
+    if names.is_empty() {
         return existing.map(str::to_string);
     }
-    Some(wine::merge_dll_overrides(DXVK_OVERRIDE, existing))
+    Some(wine::merge_dll_overrides(
+        &format!("{}=n,b", names.join(",")),
+        existing,
+    ))
+}
+
+/// One registry value under `HKLM\SOFTWARE\Sega\SEGA Rally`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegValue {
+    pub name: &'static str,
+    pub value: String,
+    /// Written only when the value is not there yet (a default the
+    /// player's own value wins over).
+    pub if_missing: bool,
 }
 
 /// Registry values the game reads before it will start. `installdir` is
 /// the private runtime copy, with the trailing backslash of the original
-/// `SEGA Rally.reg`.
-pub fn registry_values(runtime_windows_path: &str, language: &str) -> [(&'static str, String); 3] {
-    [
-        ("installdir", format!("{runtime_windows_path}\\")),
-        ("sku", "Europe".to_string()),
-        ("language", language.to_string()),
+/// `SEGA Rally.reg`. `language` is written when the option is set; unset,
+/// English is only a default for a missing value.
+pub fn registry_values(runtime_windows_path: &str, language: Option<&str>) -> Vec<RegValue> {
+    vec![
+        RegValue {
+            name: "installdir",
+            value: format!("{runtime_windows_path}\\"),
+            if_missing: false,
+        },
+        RegValue {
+            name: "sku",
+            value: "Europe".to_string(),
+            if_missing: false,
+        },
+        RegValue {
+            name: "language",
+            value: language.unwrap_or("English").to_string(),
+            if_missing: language.is_none(),
+        },
     ]
 }
 
@@ -254,9 +302,21 @@ pub fn documents_paths(profile: &std::path::Path, public: &std::path::Path) -> D
 mod tests {
     use super::*;
 
+    const ALL_SET: Graphics = Graphics {
+        resolution: Some((2560, 1440)),
+        quality: Some(Quality::High),
+        vsync: Some(true),
+    };
+
+    fn update(existing: &str, graphics: &Graphics, owned: &mut Owned) -> String {
+        let seed = ((1920, 1080), Quality::High, true);
+        let out = next_config(Ok(existing.as_bytes().to_vec()), seed, graphics, owned).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
     #[test]
     fn high_matches_the_proven_seed() {
-        let text = graphics_section((3840, 2160), Quality::High, true);
+        let text = seed_config((3840, 2160), Quality::High, true);
         for (key, value) in [
             ("HorizontalResolution", "3840"),
             ("VerticalResolution", "2160"),
@@ -272,54 +332,154 @@ mod tests {
             ("RefreshRate", "60"),
         ] {
             assert!(
-                text.contains(&format!("{key}={value}")),
+                text.contains(&format!("\n{key}={value}\n")),
                 "missing {key}={value}"
             );
         }
+        assert_eq!(graphics_keys((1, 1), Quality::Normal, false).len(), 25);
     }
 
     #[test]
-    fn seed_contains_the_seed_sections_and_graphics() {
-        let text = seed_config((1920, 1080), Quality::Normal, false);
-        assert!(text.contains("[Audio]"));
-        assert!(text.contains("Quality=3"));
-        assert!(text.contains("[GameController]\nGUID="));
-        assert!(text.contains("[Graphics]\nAdapterOrdinal=0"));
+    fn a_missing_file_is_seeded_complete() {
+        let mut owned = Owned::default();
+        let out = next_config(
+            Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+            ((1920, 1080), Quality::Normal, false),
+            &Graphics::default(),
+            &mut owned,
+        )
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.starts_with("[Audio]\nDriverGUID="));
+        assert!(text.contains("[GameController]\nGUID=\n"));
+        assert!(text.contains("[Graphics]\nAdapterOrdinal=0\n"));
         assert!(text.contains("HorizontalResolution=1920"));
         assert!(text.contains("VSync=0"));
+        assert!(text.ends_with("RunWindowed=0\n"));
+        assert!(owned.is_empty(), "nothing set in launcher.cfg");
     }
 
     #[test]
-    fn update_preserves_unrelated_sections_and_comments() {
-        let existing = "# player file\n[Audio]\nQuality=2\n\n[GameController]\nGUID={1234}\nMapping=ABC\n\n[Graphics]\nHorizontalResolution=800\nVSync=0\nCustomKey=keep\n";
-        let out = update_config(existing, (2560, 1440), Quality::High, true);
-        assert!(out.contains("# player file"));
-        assert!(out.contains("[Audio]\nQuality=2"));
-        assert!(out.contains("GUID={1234}"));
-        assert!(out.contains("Mapping=ABC"));
-        assert!(out.contains("HorizontalResolution=2560"));
-        assert!(out.contains("VerticalResolution=1440"));
-        assert!(out.contains("VSync=1"));
-        assert!(out.contains("CustomKey=keep"));
-        assert!(out.contains("GraphicQuality=3"));
+    fn only_the_set_options_keys_are_written() {
+        let existing = "# player file\n[Audio]\nQuality=2\n\n[GameController]\nGUID={1234}\nMapping=ABC\n\n[Graphics]\nHorizontalResolution=800\nVerticalResolution=600\nVSync=0\nGraphicQuality=1\nRunWindowed=1\nCustomKey=keep\n";
+        let mut owned = Owned::default();
+        let only_vsync = Graphics {
+            vsync: Some(true),
+            ..Graphics::default()
+        };
+        let out = update(existing, &only_vsync, &mut owned);
+        assert_eq!(
+            out,
+            existing.replace("VSync=0", "VSync=1"),
+            "only VSync changes"
+        );
+        let out = update(existing, &ALL_SET, &mut owned);
+        for kept in [
+            "# player file",
+            "[Audio]\nQuality=2",
+            "GUID={1234}",
+            "Mapping=ABC",
+            "RunWindowed=1",
+            "CustomKey=keep",
+        ] {
+            assert!(out.contains(kept), "{kept}");
+        }
+        for written in [
+            "HorizontalResolution=2560",
+            "VerticalResolution=1440",
+            "VSync=1",
+            "GraphicQuality=3",
+            "MudQuality=1",
+        ] {
+            assert!(out.contains(written), "{written}");
+        }
+        assert!(!out.contains("AdapterOrdinal"), "unset keys are not added");
     }
 
     #[test]
-    fn update_adds_a_missing_graphics_section() {
-        let out = update_config("[Audio]\nQuality=3\n", (1920, 1080), Quality::Normal, true);
-        assert!(out.contains("[Graphics]\nAdapterOrdinal=0"));
-        assert!(out.contains("[Audio]\nQuality=3"));
+    fn unsetting_restores_only_what_is_still_ours() {
+        let existing = "[Graphics]\nHorizontalResolution=800\nVerticalResolution=600\nVSync=0\n";
+        let mut owned = Owned::default();
+        let written = update(existing, &ALL_SET, &mut owned);
+        // The player changes vsync in the game's menu meanwhile.
+        let played = written.replace("VSync=1", "VSync=0");
+        let out = update(&played, &Graphics::default(), &mut owned);
+        assert!(out.contains("HorizontalResolution=800\nVerticalResolution=600\n"));
+        assert!(out.contains("VSync=0"));
+        // The quality keys did not exist before us: they go again.
+        assert!(!out.contains("GraphicQuality"));
+        assert!(owned.is_empty());
     }
 
     #[test]
-    fn update_adds_missing_keys_into_an_existing_section() {
-        let out = update_config("[Graphics]\nVSync=0\n", (1920, 1080), Quality::Normal, true);
-        // the new keys land inside the section, after the keys already there
-        let graphics = out.split_once("[Graphics]\n").unwrap().1;
-        assert!(graphics.starts_with("VSync=1\n"));
-        assert!(graphics.contains("AdapterOrdinal=0"));
-        assert!(graphics.contains("MudQuality=2"));
-        assert!(out.ends_with("RunWindowed=0\n"));
+    fn spaced_and_differently_cased_keys_are_updated_in_place() {
+        let existing = "[Audio]\r\nQuality = 2\r\n\r\n[GameController]\r\nGUID = {1234}\r\n\r\n[Graphics]\r\nHorizontalResolution = 1280\r\nverticalresolution=720\r\n";
+        let mut owned = Owned::default();
+        let graphics = Graphics {
+            resolution: Some((3840, 2160)),
+            ..Graphics::default()
+        };
+        let out = update(existing, &graphics, &mut owned);
+        assert_eq!(out.matches("HorizontalResolution").count(), 1);
+        assert_eq!(
+            out.to_ascii_lowercase()
+                .matches("verticalresolution")
+                .count(),
+            1
+        );
+        assert!(out.contains("HorizontalResolution=3840\r\n"));
+        assert!(
+            out.starts_with("[Audio]\r\nQuality = 2\r\n\r\n[GameController]\r\nGUID = {1234}\r\n")
+        );
+        assert!(!out.replace("\r\n", "").contains('\n'), "line endings kept");
+        assert_eq!(update(&out, &graphics, &mut owned), out);
+        assert_eq!(resolution_in(out.as_bytes()), Some((3840, 2160)));
+    }
+
+    #[test]
+    fn non_utf8_controller_names_survive_byte_for_byte() {
+        let existing = b"[GameController]\r\nGUID={1234}\r\nName=Manette \xE9tendue\r\n\r\n[Graphics]\r\nVSync=0\r\n".to_vec();
+        let mut owned = Owned::default();
+        let out = next_config(
+            Ok(existing),
+            ((1, 1), Quality::High, true),
+            &ALL_SET,
+            &mut owned,
+        )
+        .unwrap();
+        assert!(out.starts_with(b"[GameController]\r\nGUID={1234}\r\nName=Manette \xE9tendue\r\n"));
+        let text = String::from_utf8_lossy(&out);
+        assert!(text.contains("VSync=1\r\n"));
+        assert_eq!(text.matches("VSync").count(), 1);
+    }
+
+    #[test]
+    fn a_bom_is_kept_and_graphics_still_matches() {
+        let mut owned = Owned::default();
+        let out = next_config(
+            Ok(b"\xEF\xBB\xBF[Graphics]\nVSync=0\n".to_vec()),
+            ((1, 1), Quality::High, true),
+            &ALL_SET,
+            &mut owned,
+        )
+        .unwrap();
+        assert!(out.starts_with(b"\xEF\xBB\xBF[Graphics]\nVSync=1\n"));
+        assert_eq!(
+            String::from_utf8_lossy(&out).matches("[Graphics]").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn an_unreadable_config_is_left_alone() {
+        use std::io::{Error, ErrorKind};
+        let denied = next_config(
+            Err(Error::from(ErrorKind::PermissionDenied)),
+            ((1920, 1080), Quality::High, true),
+            &ALL_SET,
+            &mut Owned::default(),
+        );
+        assert_eq!(denied.unwrap_err().kind(), ErrorKind::PermissionDenied);
     }
 
     #[test]
@@ -335,114 +495,45 @@ mod tests {
             ]
         );
         assert!(WINEBUS_VALUES.iter().all(|(_, value)| *value == 1));
+    }
+
+    #[test]
+    fn wine_overrides_put_ours_first_and_keep_unrelated_rules() {
+        let none: &[String] = &[];
         assert_eq!(
-            wine::WINEBUS_KEY,
-            r"System\CurrentControlSet\Services\winebus"
+            wine_overrides(None, true, none).as_deref(),
+            Some("d3d9=n,b")
         );
-    }
-
-    #[test]
-    fn update_recognises_spaced_and_differently_cased_keys() {
-        let existing = "[Audio]\r\nQuality = 2\r\n\r\n[GameController]\r\nGUID = {1234}\r\n\r\n[Graphics]\r\nHorizontalResolution = 1280\r\nverticalresolution=720\r\n";
-        let out = update_config(existing, (3840, 2160), Quality::High, true);
-        assert_eq!(out.matches("HorizontalResolution").count(), 1);
         assert_eq!(
-            out.to_ascii_lowercase()
-                .matches("verticalresolution")
-                .count(),
-            1
-        );
-        assert!(out.contains("HorizontalResolution=3840\r\n"));
-        assert!(out.contains("VerticalResolution=2160\r\n"));
-        // the player's sections, spacing included, are untouched
-        assert!(
-            out.starts_with("[Audio]\r\nQuality = 2\r\n\r\n[GameController]\r\nGUID = {1234}\r\n")
-        );
-        assert!(!out.replace("\r\n", "").contains('\n'), "line endings kept");
-        // and running it again changes nothing
-        assert_eq!(update_config(&out, (3840, 2160), Quality::High, true), out);
-    }
-
-    #[test]
-    fn update_bytes_keeps_non_utf8_controller_names_byte_for_byte() {
-        let mut existing = b"[GameController]\r\nGUID={1234}\r\nName=Manette \xE9tendue\r\n\r\n[Graphics]\r\nVSync=0\r\n".to_vec();
-        assert!(std::str::from_utf8(&existing).is_err());
-        let out = update_config_bytes(&existing, (1920, 1080), Quality::High, true);
-        assert!(out.starts_with(b"[GameController]\r\nGUID={1234}\r\nName=Manette \xE9tendue\r\n"));
-        let text = String::from_utf8_lossy(&out);
-        assert!(text.contains("VSync=1\r\n"));
-        assert_eq!(text.matches("VSync").count(), 1);
-        // valid UTF-8 (a pad name with an accent) survives too
-        existing = "[GameController]\nName=Manette étendue\n"
-            .as_bytes()
-            .to_vec();
-        let out = update_config_bytes(&existing, (1920, 1080), Quality::High, true);
-        assert!(out.starts_with("[GameController]\nName=Manette étendue\n".as_bytes()));
-    }
-
-    #[test]
-    fn only_a_missing_config_is_seeded() {
-        use std::io::{Error, ErrorKind};
-        let seeded = next_config(
-            Err(Error::from(ErrorKind::NotFound)),
-            (1920, 1080),
-            Quality::High,
-            true,
-        )
-        .unwrap();
-        assert!(seeded.starts_with(b"[Audio]"));
-        let denied = next_config(
-            Err(Error::from(ErrorKind::PermissionDenied)),
-            (1920, 1080),
-            Quality::High,
-            true,
-        );
-        assert_eq!(denied.unwrap_err().kind(), ErrorKind::PermissionDenied);
-        let updated = next_config(
-            Ok(b"[GameController]\nGUID={1}\n".to_vec()),
-            (1920, 1080),
-            Quality::High,
-            true,
-        )
-        .unwrap();
-        assert!(updated.starts_with(b"[GameController]\nGUID={1}\n"));
-    }
-
-    #[test]
-    fn update_bytes_matches_graphics_after_a_bom_and_keeps_it() {
-        let existing = b"\xEF\xBB\xBF[Graphics]\nVSync=0\n";
-        let out = update_config_bytes(existing, (1920, 1080), Quality::High, true);
-        assert!(out.starts_with(b"\xEF\xBB\xBF[Graphics]\nVSync=1\n"));
-        assert_eq!(
-            String::from_utf8_lossy(&out).matches("[Graphics]").count(),
-            1
-        );
-    }
-
-    #[test]
-    fn wine_overrides_put_dxvk_first_and_keep_unrelated_rules() {
-        assert_eq!(wine_overrides(None, true).as_deref(), Some("d3d9=n,b"));
-        assert_eq!(
-            wine_overrides(Some("mscoree,mshtml="), true).as_deref(),
+            wine_overrides(Some("mscoree,mshtml="), true, none).as_deref(),
             Some("d3d9=n,b;mscoree,mshtml=")
         );
         assert_eq!(
-            wine_overrides(Some("d3d8,D3D9=b;dsound=n;;winemenubuilder.exe=d"), true).as_deref(),
+            wine_overrides(
+                Some("d3d8,D3D9=b;dsound=n;;winemenubuilder.exe=d"),
+                true,
+                none
+            )
+            .as_deref(),
             Some("d3d9=n,b;d3d8=b;dsound=n;winemenubuilder.exe=d")
         );
-        // spelled with .dll, in any case
         assert_eq!(
-            wine_overrides(Some("d3d9.dll=b;D3D9.DLL,xinput1_3.dll=n"), true).as_deref(),
+            wine_overrides(Some("d3d9.dll=b;D3D9.DLL,xinput1_3.dll=n"), true, none).as_deref(),
             Some("d3d9=n,b;xinput1_3.dll=n")
         );
+        let dx = ["d3dx9_35".to_string(), "d3dcompiler_43".to_string()];
         assert_eq!(
-            wine_overrides(Some("d3d9x.dll=b"), true).as_deref(),
-            Some("d3d9=n,b;d3d9x.dll=b")
+            wine_overrides(Some("d3dx9_35=b;x=n"), true, &dx).as_deref(),
+            Some("d3d9,d3dx9_35,d3dcompiler_43=n,b;x=n")
         );
-        // no DXVK of ours: the caller's value is left exactly as it was
-        assert_eq!(wine_overrides(None, false), None);
         assert_eq!(
-            wine_overrides(Some("d3d9=b"), false).as_deref(),
+            wine_overrides(None, false, &dx).as_deref(),
+            Some("d3dx9_35,d3dcompiler_43=n,b")
+        );
+        // nothing of ours: the caller's value is left exactly as it was
+        assert_eq!(wine_overrides(None, false, none), None);
+        assert_eq!(
+            wine_overrides(Some("d3d9=b"), false, none).as_deref(),
             Some("d3d9=b")
         );
     }
@@ -458,14 +549,36 @@ mod tests {
 
     #[test]
     fn registry_values_carry_the_runtime_path_and_language() {
-        let values = registry_values(r"C:\users\me\AppData\Local\SRRLauncher\SegaRally", "French");
-        assert_eq!(values[0].0, "installdir");
+        let values = registry_values(
+            r"C:\users\me\AppData\Local\SRRLauncher\SegaRally",
+            Some("French"),
+        );
+        assert_eq!(values[0].name, "installdir");
         assert_eq!(
-            values[0].1,
+            values[0].value,
             r"C:\users\me\AppData\Local\SRRLauncher\SegaRally\"
         );
-        assert_eq!(values[1], ("sku", "Europe".to_string()));
-        assert_eq!(values[2], ("language", "French".to_string()));
+        assert_eq!(
+            (values[1].name, values[1].value.as_str()),
+            ("sku", "Europe")
+        );
+        assert_eq!(
+            values[2],
+            RegValue {
+                name: "language",
+                value: "French".into(),
+                if_missing: false
+            }
+        );
+        let unset = registry_values(r"C:\x", None);
+        assert_eq!(
+            unset[2],
+            RegValue {
+                name: "language",
+                value: "English".into(),
+                if_missing: true
+            }
+        );
     }
 
     #[test]
@@ -480,21 +593,11 @@ mod tests {
                 .join("SEGA Rally")
                 .join("Saved Games")
         );
-        assert_eq!(
-            paths.rank_table,
-            public
-                .join("Documents")
-                .join("SEGA Rally")
-                .join("Shared Data")
-                .join("Rank Table")
-        );
-        assert_eq!(
-            paths.ghosts,
-            public
-                .join("Documents")
-                .join("SEGA Rally")
-                .join("Shared Data")
-                .join("Ghosts")
-        );
+        let shared = public
+            .join("Documents")
+            .join("SEGA Rally")
+            .join("Shared Data");
+        assert_eq!(paths.rank_table, shared.join("Rank Table"));
+        assert_eq!(paths.ghosts, shared.join("Ghosts"));
     }
 }

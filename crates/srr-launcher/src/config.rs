@@ -1,60 +1,44 @@
+//! `launcher.cfg` and the command line, from one option table
+//! ([`OPTIONS`], the SDK's `cfg::spec`): `--help`, the template, file and
+//! flag parsing, and the window's labels and descriptions all come from it.
+
 use std::path::PathBuf;
 
-use rea_launcher::cfg::{self, ArgError, Rejected};
+use rea_launcher::cfg::{
+    self, ArgError, KeyStyle, Rejected, Resolution,
+    spec::{self, Kind, OptionSpec, Value},
+};
 
-/// Display aspect ratios. `16:9` and `16:10` exist in the game's own
-/// tables; the ultra-wide ratios are patched into the runtime copy.
+/// The aspect the renderer gets. It follows the resolution: 16:9 and
+/// 16:10 are in the game's own tables; ultra-wide sizes get the aspect
+/// fix in the private copy (`patches::aspect_set`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Aspect {
-    Ratio169,
-    Ratio1610,
-    Ratio219,
-    Ratio329,
+    /// 16:9, 16:10 and anything narrower: the game's own tables.
+    Native,
+    /// 21:9 (64:27) screens such as 2560x1080 and 3440x1440.
+    Ultra21,
+    /// 32:9 screens such as 3840x1080 and 5120x1440.
+    Ultra32,
 }
 
 impl Aspect {
-    pub const ALL: [Aspect; 4] = [
-        Aspect::Ratio169,
-        Aspect::Ratio1610,
-        Aspect::Ratio219,
-        Aspect::Ratio329,
-    ];
+    pub fn for_resolution((width, height): (u32, u32)) -> Aspect {
+        let ratio = width as f64 / height.max(1) as f64;
+        if (ratio - 32.0 / 9.0).abs() < 0.2 {
+            Aspect::Ultra32
+        } else if (ratio - 64.0 / 27.0).abs() < 0.12 {
+            Aspect::Ultra21
+        } else {
+            Aspect::Native
+        }
+    }
 
     pub fn key(self) -> &'static str {
         match self {
-            Aspect::Ratio169 => "16:9",
-            Aspect::Ratio1610 => "16:10",
-            Aspect::Ratio219 => "21:9",
-            Aspect::Ratio329 => "32:9",
-        }
-    }
-
-    /// The value the renderer should use.
-    pub fn ratio(self) -> f32 {
-        match self {
-            Aspect::Ratio169 => 16.0 / 9.0,
-            Aspect::Ratio1610 => 1.6,
-            Aspect::Ratio219 => 64.0 / 27.0,
-            Aspect::Ratio329 => 32.0 / 9.0,
-        }
-    }
-
-    fn parse(value: &str) -> Option<Aspect> {
-        Aspect::ALL
-            .into_iter()
-            .find(|aspect| aspect.key() == value.trim())
-    }
-
-    pub fn for_resolution(width: u32, height: u32) -> Aspect {
-        let ratio = width as f64 / height.max(1) as f64;
-        if (ratio - 1.6).abs() < 0.06 {
-            Aspect::Ratio1610
-        } else if (ratio - 64.0 / 27.0).abs() < 0.12 {
-            Aspect::Ratio219
-        } else if (ratio - 32.0 / 9.0).abs() < 0.2 {
-            Aspect::Ratio329
-        } else {
-            Aspect::Ratio169
+            Aspect::Native => "native",
+            Aspect::Ultra21 => "21:9",
+            Aspect::Ultra32 => "32:9",
         }
     }
 }
@@ -81,18 +65,10 @@ impl Quality {
         }
     }
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Quality::Normal => "Normal",
-            Quality::High => "High",
-            Quality::Ultra => "Ultra",
-        }
-    }
-
-    fn parse(value: &str) -> Option<Quality> {
+    pub fn parse(value: &str) -> Option<Quality> {
         Quality::ALL
             .into_iter()
-            .find(|quality| quality.key() == value.trim().to_ascii_lowercase())
+            .find(|quality| quality.key().eq_ignore_ascii_case(value.trim()))
     }
 }
 
@@ -133,10 +109,68 @@ impl FrameLimit {
         }
     }
 
-    fn parse(value: &str) -> Option<FrameLimit> {
+    pub fn parse(value: &str) -> Option<FrameLimit> {
         FrameLimit::ALL
             .into_iter()
-            .find(|limit| limit.key() == value.trim().to_ascii_lowercase())
+            .find(|limit| limit.key().eq_ignore_ascii_case(value.trim()))
+    }
+}
+
+/// A look: a named set of picture values (resolution, quality, vsync).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Look {
+    Modern,
+    SteamDeck,
+    Original,
+    Custom,
+}
+
+/// A look's picture values; `resolution: None` is the screen's size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Preset {
+    pub resolution: Option<(u32, u32)>,
+    pub quality: Quality,
+    pub vsync: bool,
+}
+
+impl Look {
+    pub const ALL: [Look; 4] = [Look::Modern, Look::SteamDeck, Look::Original, Look::Custom];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Look::Modern => "modern",
+            Look::SteamDeck => "steam-deck",
+            Look::Original => "original",
+            Look::Custom => "custom",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Look> {
+        Look::ALL
+            .into_iter()
+            .find(|look| look.key().eq_ignore_ascii_case(value.trim()))
+    }
+
+    /// The look's values, `None` for Custom.
+    pub fn preset(self) -> Option<Preset> {
+        match self {
+            Look::Modern => Some(Preset {
+                resolution: None,
+                quality: Quality::High,
+                vsync: true,
+            }),
+            Look::SteamDeck => Some(Preset {
+                resolution: Some(rea_launcher::display::STEAM_DECK_SCREEN),
+                quality: Quality::High,
+                vsync: true,
+            }),
+            Look::Original => Some(Preset {
+                resolution: Some((1280, 720)),
+                quality: Quality::Normal,
+                vsync: true,
+            }),
+            Look::Custom => None,
+        }
     }
 }
 
@@ -144,12 +178,168 @@ pub const LANGUAGES: [&str; 6] = [
     "English", "French", "German", "Spanish", "Italian", "Polish",
 ];
 
+const LOOKS: &[(&str, &str)] = &[
+    ("modern", "Modern"),
+    ("steam-deck", "Steam Deck"),
+    ("original", "Original 2007"),
+    ("custom", "Custom"),
+];
+const QUALITIES: &[(&str, &str)] = &[("normal", "Normal"), ("high", "High"), ("ultra", "Ultra")];
+const FRAME_LIMITS: &[(&str, &str)] = &[("60", "60 fps"), ("120", "120 fps"), ("off", "Off")];
+const LANGUAGE_CHOICES: &[(&str, &str)] = &[
+    ("English", "English"),
+    ("French", "French"),
+    ("German", "German"),
+    ("Spanish", "Spanish"),
+    ("Italian", "Italian"),
+    ("Polish", "Polish"),
+];
+/// `auto`: the screen's own size (the SDK's "whole screen" word).
+const AUTO: &cfg::Aliases = &[("auto", Resolution::Fullscreen)];
+
+/// Every option of the launcher, once: `launcher.cfg` key, flag, values,
+/// label and the one-line description the window and the template show.
+pub const OPTIONS: &[OptionSpec] = &[
+    OptionSpec::new(
+        "game",
+        Kind::Path,
+        "Game folder",
+        "The folder with SEGA Rally.exe or SEGA Rally_SSE1.exe. It is only read, never changed.",
+    ),
+    OptionSpec::new(
+        "runtime",
+        Kind::Path,
+        "Private copy",
+        r"Where the launcher keeps its fixed-up copy of the game. Default: %LOCALAPPDATA%\SRRLauncher\SegaRally.",
+    )
+    .launcher_only(),
+    OptionSpec::new(
+        "look",
+        Kind::Choice(LOOKS),
+        "Look",
+        "A ready-made picture: Modern (your screen, High), Steam Deck (1280x800, High), Original 2007 (1280x720, Normal). On the command line it sets those values for one run.",
+    ),
+    OptionSpec::new(
+        "resolution",
+        Kind::Size {
+            min: (640, 480),
+            max: (7680, 4320),
+            aliases: AUTO,
+        },
+        "Resolution",
+        "The game's screen size; auto uses your screen. Ultra-wide sizes (21:9, 32:9) get the aspect fix, so the picture is not stretched.",
+    )
+    .with_example("3840x2160"),
+    OptionSpec::new(
+        "quality",
+        Kind::Choice(QUALITIES),
+        "Quality",
+        "The game's detail preset: Normal is the 2007 look, High sharper shadows and track detail, Ultra every slider at maximum.",
+    ),
+    OptionSpec::new(
+        "vsync",
+        Kind::Toggle,
+        "Vsync",
+        "Waits for the screen's refresh: no tearing. Off can tear on screens above 60 Hz.",
+    ),
+    OptionSpec::new(
+        "frame_limit",
+        Kind::Choice(FRAME_LIMITS),
+        "Frame limit",
+        "The highest frame rate under Linux, Wine or Proton (through DXVK). 60 is the steady default.",
+    )
+    .with_aliases(&["frame-limit"]),
+    OptionSpec::new(
+        "stutter_fix",
+        Kind::Toggle,
+        "Stutter fix",
+        "The community fix for the microstutter in every race and the judder from Championship stage 2. Needs the clean SEGA Rally_SSE1.exe.",
+    )
+    .with_aliases(&["stutter-fix"]),
+    OptionSpec::new(
+        "language",
+        Kind::Choice(LANGUAGE_CHOICES),
+        "Language",
+        "The language of the game's menus.",
+    ),
+];
+
+/// Keys of earlier releases that no longer do anything; an old
+/// `launcher.cfg` that still has them is read without a warning, and the
+/// lines are left in the file. `aspect` now follows the resolution;
+/// `fullscreen` went in v0.1.0.
+pub const RETIRED_KEYS: [&str; 2] = ["aspect", "fullscreen"];
+
+/// The launcher's value-less switches.
+pub const SWITCHES: [&str; 7] = [
+    "--check",
+    "--setup",
+    "--no-window",
+    "--settings",
+    "--linux",
+    "--download-directx",
+    "--help",
+];
+
+/// The option row for `key`.
+pub fn option(key: &str) -> &'static OptionSpec {
+    spec::find(OPTIONS, key).expect("a key of OPTIONS")
+}
+
+pub const FILE_NAME: &str = "launcher.cfg";
+
+/// The first-run `launcher.cfg`: every option commented out.
+pub fn template() -> String {
+    spec::template(
+        "Sega Rally Revo launcher settings.\n\
+         key = value; lines starting with # are comments. An unset key keeps the \
+         game's own value (or the launcher's default where the game has none). \
+         The settings window fills these in when you press Play.",
+        OPTIONS,
+    )
+}
+
+/// `--help`: the options from the table, then the switches.
+pub fn usage() -> String {
+    format!(
+        "SRRLauncher {}\n\nSRRLauncher [options]\n\n{}\
+  --check               check the game folder and exit (exit code 1 if it cannot play)\n\
+  --setup               prepare the private copy and the game's settings, without playing\n\
+  --download-directx    download Microsoft's DirectX 9 files into the private copy, then exit\n\
+  --no-window           play with the saved settings, no launcher window\n\
+  --settings            only show the settings window\n\
+  --linux               running under srr-play or the AppImage: install DXVK into the copy\n\
+  --help                show this help\n\n\
+Options override launcher.cfg for one run; only --game is remembered.\n",
+        env!("CARGO_PKG_VERSION"),
+        spec::usage(OPTIONS, KeyStyle::Underscore)
+    )
+}
+
+/// The message for a refused command line.
+fn arg_message(error: ArgError) -> String {
+    match error {
+        ArgError::Help(_) => usage(),
+        ArgError::Unknown(flag) if flag == "--aspect" => format!(
+            "--aspect was removed: the aspect now follows the resolution \
+             (ultra-wide sizes get the aspect fix).\n\n{}",
+            usage()
+        ),
+        ArgError::Unknown(flag) => format!("unknown option {flag}\n\n{}", usage()),
+        ArgError::MissingValue(flag) => format!("{flag} needs a value\n\n{}", usage()),
+        ArgError::Bad { flag, value, needs } => {
+            format!("{flag} needs {needs}, not {value:?}\n\n{}", usage())
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Settings {
     pub game: Option<PathBuf>,
     pub runtime: Option<PathBuf>,
-    pub resolution: Option<(u32, u32)>,
-    pub aspect: Option<Aspect>,
+    pub look: Option<Look>,
+    /// `Some(None)` is `auto` said out loud; `None` is unset.
+    pub resolution: Option<Option<(u32, u32)>>,
     pub quality: Option<Quality>,
     pub vsync: Option<bool>,
     pub frame_limit: Option<FrameLimit>,
@@ -157,190 +347,109 @@ pub struct Settings {
     pub language: Option<String>,
 }
 
-pub const FILE_NAME: &str = "launcher.cfg";
-
-pub const TEMPLATE: &str = r"# Sega Rally Revo launcher settings.
-# key = value; lines starting with # are comments.
-
-# Folder containing SEGA Rally.exe / SEGA Rally_SSE1.exe. Never changed.
-game =
-
-# Private writable copy. Default: %LOCALAPPDATA%\SRRLauncher\SegaRally
-#runtime =
-
-# Resolution and aspect are filled in by the settings window. Command-line
-# runs without these use the current landscape screen, or 1920x1080.
-#resolution = 3840x2160
-#aspect = 16:9
-
-# The game's own preset: normal, high (default) or ultra.
-#quality = high
-
-vsync = true
-
-# Frame limit through DXVK: 60 (default), 120 or off.
-#frame-limit = 60
-
-# Community stutter fix for the clean SSE1 build: on (default) or off.
-#stutter-fix = on
-
-# Menu language written to the registry: English, French, German, Spanish,
-# Italian or Polish.
-#language = English
-";
-
-pub const USAGE: &str = concat!(
-    "SRRLauncher ",
-    env!("CARGO_PKG_VERSION"),
-    "\n\nSRRLauncher [options]\n\n",
-    "  --game <folder>       folder with SEGA Rally.exe or SEGA Rally_SSE1.exe (remembered)\n",
-    "  --runtime <folder>    private writable game copy\n",
-    "  --resolution <WxH>    e.g. 3840x2160\n",
-    "  --aspect <ratio>      16:9, 16:10, 21:9 or 32:9\n",
-    "  --quality <preset>    normal, high or ultra\n",
-    "  --vsync on|off        wait for the display refresh\n",
-    "  --frame-limit <fps>   60, 120 or off\n",
-    "  --stutter-fix on|off  community pacer fix on the private copy\n",
-    "  --language <name>     English, French, German, Spanish, Italian or Polish\n",
-    "  --check               validate the game and exit\n",
-    "  --setup               prepare the runtime and settings without playing\n",
-    "  --no-window           play with saved settings, no launcher window\n",
-    "  --settings            only show the settings window\n",
-    "  --linux               running under srr-play/AppImage: install DXVK into the copy\n",
-    "  --help                show this help\n\n",
-    "Options override launcher.cfg for one run; only --game is remembered."
-);
-
-/// The registry spelling of a supported menu language, any case.
-fn canonical_language(value: &str) -> Option<&'static str> {
-    LANGUAGES
-        .into_iter()
-        .find(|language| language.eq_ignore_ascii_case(value.trim()))
+/// A parsed command line: the one-run settings and the switches given.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Cli {
+    pub settings: Settings,
+    pub switches: Vec<String>,
 }
 
-/// `WIDTHxHEIGHT` within 640x480..=7680x4320 (sizes only, no words).
-fn parse_resolution(value: &str) -> Option<(u32, u32)> {
-    cfg::parse_size(value, (640, 480), (7680, 4320))
-}
+impl Cli {
+    pub fn has(&self, switch: &str) -> bool {
+        self.switches.iter().any(|s| s == switch)
+    }
 
-/// The settings keys, as the command line spells them (`--frame-limit`
-/// arrives as `frame_limit`); the file keeps its hyphenated spelling.
-const FLAG_KEYS: [&str; 9] = [
-    "game",
-    "runtime",
-    "resolution",
-    "aspect",
-    "quality",
-    "vsync",
-    "frame_limit",
-    "stutter_fix",
-    "language",
-];
-
-/// SRR's own messages for a refused command line (shown in a message box).
-fn arg_message(error: ArgError) -> String {
-    match error {
-        ArgError::Help(_) => USAGE.to_string(),
-        ArgError::Unknown(flag) => format!("unknown option {flag}\n\n{USAGE}"),
-        ArgError::MissingValue(flag) => format!("{flag} needs a value\n\n{USAGE}"),
-        ArgError::Bad { flag, value, .. } => match flag.as_str() {
-            "--vsync" => format!("invalid vsync value {value}"),
-            "--stutter-fix" => format!("invalid stutter-fix value {value}"),
-            "--frame-limit" => format!("invalid frame limit {value}\n\n{USAGE}"),
-            other => format!(
-                "invalid {} {value}\n\n{USAGE}",
-                other.trim_start_matches('-')
-            ),
-        },
+    /// True when only switches (no options) were given.
+    pub fn options_given(&self) -> bool {
+        self.settings != Settings::default()
     }
 }
 
 impl Settings {
-    /// Takes one `key = value` (file spelling: `frame-limit`).
-    pub fn apply(&mut self, key: &str, value: &str) -> Result<(), Rejected> {
-        match key {
-            "game" => self.game = Some(value.into()),
-            "runtime" => self.runtime = Some(value.into()),
-            "resolution" => {
-                self.resolution = Some(cfg::need(parse_resolution(value), "WIDTHxHEIGHT")?)
+    /// Takes one checked value (keys are the table's, aliases resolved).
+    pub fn apply(&mut self, key: &str, value: Value) -> Result<(), Rejected> {
+        match (key, value) {
+            ("game", Value::Text(path)) => self.game = Some(path.into()),
+            ("runtime", Value::Text(path)) => self.runtime = Some(path.into()),
+            ("look", Value::Choice(look)) => self.look = Look::parse(look),
+            ("resolution", Value::Size(Resolution::Size(width, height))) => {
+                self.resolution = Some(Some((width, height)))
             }
-            "aspect" => {
-                self.aspect = Some(cfg::need(
-                    Aspect::parse(value),
-                    "16:9, 16:10, 21:9 or 32:9",
-                )?)
-            }
-            "quality" => {
-                self.quality = Some(cfg::need(Quality::parse(value), "normal, high or ultra")?)
-            }
-            "vsync" => self.vsync = Some(cfg::need(cfg::parse_bool(value), cfg::ON_OFF)?),
-            "frame-limit" => {
-                self.frame_limit = Some(cfg::need(FrameLimit::parse(value), "60, 120 or off")?)
-            }
-            "stutter-fix" => {
-                self.stutter_fix = Some(cfg::need(cfg::parse_bool(value), cfg::ON_OFF)?)
-            }
-            "language" => {
-                let language = cfg::need(canonical_language(value), "a supported language")?;
-                self.language = Some(language.to_string());
-            }
+            ("resolution", Value::Size(_)) => self.resolution = Some(None),
+            ("quality", Value::Choice(quality)) => self.quality = Quality::parse(quality),
+            ("vsync", Value::Toggle(on)) => self.vsync = Some(on),
+            ("frame_limit", Value::Choice(limit)) => self.frame_limit = FrameLimit::parse(limit),
+            ("stutter_fix", Value::Toggle(on)) => self.stutter_fix = Some(on),
+            ("language", Value::Choice(language)) => self.language = Some(language.to_string()),
             _ => return Err(Rejected::Unknown),
         }
         Ok(())
     }
 
     /// The settings in a `launcher.cfg` text and a warning per bad line.
-    /// Keys this launcher does not know (`look`, removed ones such as
-    /// `fullscreen`) are skipped without a warning.
+    /// Retired keys ([`RETIRED_KEYS`]) are skipped without a warning.
     pub fn parse_file(text: &str) -> (Settings, Vec<String>) {
         let mut settings = Settings::default();
         let warnings = cfg::parse(text, FILE_NAME, |key, value| {
-            match settings.apply(key, value) {
-                Err(Rejected::Unknown) => Ok(()),
-                other => other,
+            if RETIRED_KEYS.contains(&key) {
+                return Ok(());
             }
+            spec::dispatch(OPTIONS, key, value, &mut |key, value| {
+                settings.apply(key, value)
+            })
         });
         (settings, warnings)
     }
 
-    /// `--key value` options; the error is the message to show.
-    pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Settings, String> {
+    /// The command line; the error is the message to show.
+    pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Cli, String> {
         let mut settings = Settings::default();
-        cfg::parse_args(args, &FLAG_KEYS, &[], |key, value| {
-            settings.apply(&key.replace('_', "-"), value)
-        })
+        let switches = spec::parse_args(
+            args,
+            KeyStyle::Underscore,
+            OPTIONS,
+            &SWITCHES,
+            |key, value| settings.apply(key, value),
+        )
         .map_err(arg_message)?;
-        Ok(settings)
+        Ok(Cli { settings, switches })
     }
 
+    /// `over` (the command line) on top of `self` (the file). A look given
+    /// in `over` sets all of its values first; explicit options in `over`
+    /// still win over the look.
     pub fn merged(self, over: Settings) -> Settings {
+        let mut base = self;
+        if let Some(preset) = over.look.and_then(Look::preset) {
+            base.resolution = Some(preset.resolution);
+            base.quality = Some(preset.quality);
+            base.vsync = Some(preset.vsync);
+        }
         Settings {
-            game: over.game.or(self.game),
-            runtime: over.runtime.or(self.runtime),
-            resolution: over.resolution.or(self.resolution),
-            aspect: over.aspect.or(self.aspect),
-            quality: over.quality.or(self.quality),
-            vsync: over.vsync.or(self.vsync),
-            frame_limit: over.frame_limit.or(self.frame_limit),
-            stutter_fix: over.stutter_fix.or(self.stutter_fix),
-            language: over.language.or(self.language),
+            game: over.game.or(base.game),
+            runtime: over.runtime.or(base.runtime),
+            look: over.look.or(base.look),
+            resolution: over.resolution.or(base.resolution),
+            quality: over.quality.or(base.quality),
+            vsync: over.vsync.or(base.vsync),
+            frame_limit: over.frame_limit.or(base.frame_limit),
+            stutter_fix: over.stutter_fix.or(base.stutter_fix),
+            language: over.language.or(base.language),
         }
     }
 
+    /// The size the game runs at: the setting, or the landscape screen, or
+    /// 1920x1080.
     pub fn effective_resolution(&self, screen: Option<(u32, u32)>) -> (u32, u32) {
-        self.resolution
-            .or_else(|| screen.and_then(landscape))
-            .unwrap_or((1920, 1080))
-    }
-
-    pub fn effective_aspect(&self, screen: Option<(u32, u32)>) -> Aspect {
-        let (width, height) = self.effective_resolution(screen);
-        self.aspect
-            .unwrap_or_else(|| Aspect::for_resolution(width, height))
+        resolve_resolution(self.resolution.flatten(), screen)
     }
 
     pub fn effective_quality(&self) -> Quality {
         self.quality.unwrap_or(Quality::High)
+    }
+
+    pub fn effective_vsync(&self) -> bool {
+        self.vsync.unwrap_or(true)
     }
 
     pub fn effective_frame_limit(&self) -> FrameLimit {
@@ -351,11 +460,20 @@ impl Settings {
         self.stutter_fix.unwrap_or(true)
     }
 
-    pub fn effective_language(&self) -> String {
-        self.language
-            .clone()
-            .unwrap_or_else(|| "English".to_string())
+    pub fn effective_language(&self) -> &str {
+        self.language.as_deref().unwrap_or("English")
     }
+}
+
+/// `resolution` (`None` is auto) on a screen: the landscape screen size,
+/// else 1920x1080.
+pub fn resolve_resolution(
+    resolution: Option<(u32, u32)>,
+    screen: Option<(u32, u32)>,
+) -> (u32, u32) {
+    resolution
+        .or_else(|| screen.and_then(landscape))
+        .unwrap_or((1920, 1080))
 }
 
 /// A screen size as a landscape resolution worth offering: 640x480 and up
@@ -364,9 +482,19 @@ pub fn landscape(screen: (u32, u32)) -> Option<(u32, u32)> {
     rea_launcher::display::landscape_from(screen, (640, 480))
 }
 
+/// Writes `value` for `key` in a `launcher.cfg` text: the current key name,
+/// with any old spelling (`frame-limit`) turned into a comment.
+pub fn set_key(text: &str, key: &str, value: &str) -> String {
+    spec::set_key(text, option(key), value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn args(list: &[&str]) -> Result<Cli, String> {
+        Settings::parse_args(list.iter().map(|a| a.to_string()))
+    }
 
     #[test]
     fn defaults_are_the_recommended_setup() {
@@ -375,11 +503,9 @@ mod tests {
             settings.effective_resolution(Some((3840, 2160))),
             (3840, 2160)
         );
-        assert_eq!(
-            settings.effective_aspect(Some((3840, 2160))),
-            Aspect::Ratio169
-        );
+        assert_eq!(settings.effective_resolution(None), (1920, 1080));
         assert_eq!(settings.effective_quality(), Quality::High);
+        assert!(settings.effective_vsync());
         assert_eq!(settings.effective_frame_limit(), FrameLimit::Fps60);
         assert!(settings.effective_stutter_fix());
         assert_eq!(settings.effective_language(), "English");
@@ -390,35 +516,69 @@ mod tests {
         let (saved, warnings) =
             Settings::parse_file("game = C:\\Sega Rally\nquality = normal\nvsync = false\n");
         assert!(warnings.is_empty());
-        let over = Settings::parse_args([
-            "--quality".into(),
-            "high".into(),
-            "--resolution".into(),
-            "2560x1440".into(),
-        ])
-        .unwrap();
-        let merged = saved.merged(over);
+        let cli = args(&["--quality", "high", "--resolution", "2560x1440"]).unwrap();
+        let merged = saved.merged(cli.settings);
         assert_eq!(merged.quality, Some(Quality::High));
-        assert_eq!(merged.resolution, Some((2560, 1440)));
+        assert_eq!(merged.resolution, Some(Some((2560, 1440))));
         assert_eq!(merged.vsync, Some(false));
+        assert_eq!(merged.game, Some(PathBuf::from("C:\\Sega Rally")));
+    }
+
+    #[test]
+    fn a_look_on_the_command_line_sets_its_values_and_options_still_win() {
+        let (saved, _) =
+            Settings::parse_file("resolution = 3840x2160\nquality = ultra\nvsync = off\n");
+        let cli = args(&["--look", "original"]).unwrap();
+        let merged = saved.clone().merged(cli.settings);
+        assert_eq!(merged.resolution, Some(Some((1280, 720))));
+        assert_eq!(merged.quality, Some(Quality::Normal));
+        assert_eq!(merged.vsync, Some(true));
+        let cli = args(&["--look", "steam-deck", "--quality", "ultra"]).unwrap();
+        let merged = saved.clone().merged(cli.settings);
+        assert_eq!(merged.resolution, Some(Some((1280, 800))));
+        assert_eq!(merged.quality, Some(Quality::Ultra));
+        // Modern is the screen's size.
+        let merged = saved.merged(args(&["--look", "modern"]).unwrap().settings);
+        assert_eq!(merged.resolution, Some(None));
+        assert_eq!(
+            merged.effective_resolution(Some((2560, 1440))),
+            (2560, 1440)
+        );
+        // Custom keeps the file's values.
+        let (saved, _) = Settings::parse_file("quality = ultra\n");
+        let merged = saved.merged(args(&["--look", "custom"]).unwrap().settings);
+        assert_eq!(merged.quality, Some(Quality::Ultra));
+    }
+
+    #[test]
+    fn auto_is_a_resolution_word() {
+        let cli = args(&["--resolution", "auto"]).unwrap();
+        assert_eq!(cli.settings.resolution, Some(None));
+        assert_eq!(
+            cli.settings.effective_resolution(Some((2160, 3840))),
+            (3840, 2160)
+        );
+        let (file, warnings) = Settings::parse_file("resolution = AUTO\n");
+        assert!(warnings.is_empty());
+        assert_eq!(file.resolution, Some(None));
     }
 
     #[test]
     fn invalid_values_warn_or_fail() {
         let (settings, warnings) = Settings::parse_file(
-            "resolution = huge\nframe-limit = 7\nlanguage = Klingon\nvsync = maybe\naspect = 5:4\n",
+            "resolution = huge\nframe_limit = 7\nlanguage = Klingon\nvsync = maybe\nlook = fancy\n",
         );
-        assert_eq!(warnings.len(), 5);
-        assert_eq!(settings.language, None);
-        let args = |list: &[&str]| Settings::parse_args(list.iter().map(|a| a.to_string()));
+        assert_eq!(warnings.len(), 5, "{warnings:?}");
+        assert_eq!(settings, Settings::default());
         for bad in [
             &["--frame-limit", "7"][..],
             &["--language", "Klingon"],
             &["--vsync", "maybe"],
             &["--stutter-fix", "sometimes"],
-            &["--aspect", "5:4"],
+            &["--aspect", "21:9"],
             &["--quality", "insane"],
             &["--resolution", "100x100"],
+            &["--look", "fancy"],
             &["--fullscreen", "off"],
             &["--bogus"],
             &["--game"],
@@ -428,28 +588,134 @@ mod tests {
     }
 
     #[test]
+    fn refused_options_say_what_they_need() {
+        let error = |list: &[&str]| args(list).unwrap_err();
+        let usage = usage();
+        assert_eq!(
+            error(&["--bogus"]),
+            format!("unknown option --bogus\n\n{usage}")
+        );
+        assert_eq!(
+            error(&["--game"]),
+            format!("--game needs a value\n\n{usage}")
+        );
+        assert_eq!(
+            error(&["--vsync", "maybe"]),
+            format!("--vsync needs on or off, not \"maybe\"\n\n{usage}")
+        );
+        assert_eq!(
+            error(&["--frame-limit", "7"]),
+            format!("--frame-limit needs 60, 120 or off, not \"7\"\n\n{usage}")
+        );
+        assert_eq!(
+            error(&["--resolution", "huge"]),
+            format!("--resolution needs WIDTHxHEIGHT or auto, not \"huge\"\n\n{usage}")
+        );
+        assert!(error(&["--language", "Klingon"]).starts_with(
+            "--language needs English, French, German, Spanish, Italian or Polish, not"
+        ));
+        assert!(error(&["--aspect", "21:9"]).starts_with("--aspect was removed"));
+        for help in ["--help", "-h", "/?"] {
+            assert_eq!(error(&[help]), usage);
+        }
+    }
+
+    #[test]
     fn values_are_case_insensitive_and_canonical() {
         let (settings, warnings) =
-            Settings::parse_file("language = french\nquality = HIGH\nstutter-fix = off\n");
+            Settings::parse_file("language = french\nquality = HIGH\nstutter_fix = off\n");
         assert!(warnings.is_empty());
         assert_eq!(settings.language.as_deref(), Some("French"));
         assert_eq!(settings.quality, Some(Quality::High));
         assert_eq!(settings.stutter_fix, Some(false));
-        let cli = Settings::parse_args(["--language".into(), "POLISH".into()]).unwrap();
-        assert_eq!(cli.language.as_deref(), Some("Polish"));
+        let cli = args(&["--language", "POLISH"]).unwrap();
+        assert_eq!(cli.settings.language.as_deref(), Some("Polish"));
     }
 
     #[test]
-    fn removed_keys_in_old_files_are_ignored() {
-        let (_, warnings) = Settings::parse_file("fullscreen = false\n");
+    fn switches_come_back_in_order() {
+        let cli = args(&["--no-window", "--quality", "ultra", "--linux"]).unwrap();
+        assert_eq!(cli.switches, ["--no-window", "--linux"]);
+        assert!(cli.has("--linux") && !cli.has("--check"));
+        assert!(cli.options_given());
+        assert!(!args(&["--check"]).unwrap().options_given());
+    }
+
+    /// Files written by v0.1.x: hyphenated keys, `true`/`false`, the
+    /// retired `aspect` and `fullscreen`, a `look` the window saved.
+    #[test]
+    fn an_earlier_release_file_keeps_working() {
+        let old = "game = D:\\Games\\Sega Rally\nresolution = 3440x1440\naspect = 16:9\n\
+                   quality = high\nvsync = true\nframe-limit = off\nstutter-fix = false\n\
+                   language = German\nlook = steam-deck\nfullscreen = false\n";
+        let (settings, warnings) = Settings::parse_file(old);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(settings.frame_limit, Some(FrameLimit::Off));
+        assert_eq!(settings.stutter_fix, Some(false));
+        assert_eq!(settings.vsync, Some(true));
+        assert_eq!(settings.look, Some(Look::SteamDeck));
+        assert_eq!(settings.resolution, Some(Some((3440, 1440))));
+        // The old flags too.
+        let cli = args(&["--frame-limit", "120", "--stutter-fix", "off"]).unwrap();
+        assert_eq!(cli.settings.frame_limit, Some(FrameLimit::Fps120));
+        assert_eq!(cli.settings.stutter_fix, Some(false));
+        // Saving writes the new names and comments the old lines out.
+        let saved = set_key(old, "frame_limit", "60");
+        let saved = set_key(&saved, "stutter_fix", "on");
+        assert!(saved.contains("frame_limit = 60\n"));
+        assert!(saved.contains("stutter_fix = on\n"));
+        assert!(!saved.contains("\nframe-limit = "));
+        assert!(!saved.contains("\nstutter-fix = "));
+        let (reread, warnings) = Settings::parse_file(&saved);
         assert!(warnings.is_empty());
+        assert_eq!(reread.frame_limit, Some(FrameLimit::Fps60));
+        assert_eq!(reread.stutter_fix, Some(true));
+        // The retired aspect line stays, untouched and ignored.
+        assert!(saved.contains("aspect = 16:9\n"));
     }
 
     #[test]
-    fn keys_are_updated_without_losing_comments() {
-        let text = "# hello\nquality = normal\nvsync = true\n";
-        let text = cfg::set_key(text, "quality", "high");
-        assert!(text.contains("# hello\nquality = high\n"));
+    fn the_template_parses_to_nothing_and_lists_every_key() {
+        let template = template();
+        let (settings, warnings) = Settings::parse_file(&template);
+        assert!(warnings.is_empty());
+        assert_eq!(settings, Settings::default());
+        for option in OPTIONS {
+            assert!(
+                template.contains(&format!("#{} =", option.key)),
+                "{}",
+                option.key
+            );
+            assert!(!option.description.is_empty(), "{}", option.key);
+        }
+        // The window fills a placeholder in place.
+        let filled = set_key(&template, "vsync", "off");
+        assert_eq!(Settings::parse_file(&filled).0.vsync, Some(false));
+    }
+
+    #[test]
+    fn help_lists_every_flag() {
+        let usage = usage();
+        for option in OPTIONS {
+            assert!(usage.contains(&option.flag_name(KeyStyle::Underscore)));
+        }
+        for switch in SWITCHES {
+            assert!(usage.contains(switch), "{switch}");
+        }
+        assert!(usage.contains("--resolution <WxH>"));
+        assert!(usage.contains("--frame-limit 60|120|off"));
+        assert!(usage.contains("--look modern|steam-deck|original|custom"));
+    }
+
+    #[test]
+    fn ultra_wide_sizes_pick_the_aspect_fix() {
+        assert_eq!(Aspect::for_resolution((1920, 1080)), Aspect::Native);
+        assert_eq!(Aspect::for_resolution((1280, 800)), Aspect::Native);
+        assert_eq!(Aspect::for_resolution((1280, 720)), Aspect::Native);
+        assert_eq!(Aspect::for_resolution((2560, 1080)), Aspect::Ultra21);
+        assert_eq!(Aspect::for_resolution((3440, 1440)), Aspect::Ultra21);
+        assert_eq!(Aspect::for_resolution((3840, 1080)), Aspect::Ultra32);
+        assert_eq!(Aspect::for_resolution((5120, 1440)), Aspect::Ultra32);
     }
 
     #[test]
@@ -458,60 +724,5 @@ mod tests {
         // 640x480 itself is offered (the SDK's rule starts above it).
         assert_eq!(landscape((480, 640)), Some((640, 480)));
         assert_eq!(landscape((639, 480)), None);
-        assert_eq!(Aspect::for_resolution(1280, 800), Aspect::Ratio1610);
-        assert_eq!(Aspect::for_resolution(3440, 1440), Aspect::Ratio219);
-        assert_eq!(Aspect::for_resolution(3840, 1080), Aspect::Ratio329);
-    }
-
-    #[test]
-    fn hyphenated_keys_and_their_flags() {
-        let (file, warnings) = Settings::parse_file("frame-limit = off\nstutter-fix = off\n");
-        assert!(warnings.is_empty());
-        assert_eq!(file.frame_limit, Some(FrameLimit::Off));
-        assert_eq!(file.stutter_fix, Some(false));
-        // the underscore spelling is not a key of this file
-        let (other, _) = Settings::parse_file("frame_limit = off\n");
-        assert_eq!(other.frame_limit, None);
-        let cli = Settings::parse_args(
-            ["--frame-limit", "120", "--stutter-fix", "off"].map(String::from),
-        )
-        .unwrap();
-        assert_eq!(cli.frame_limit, Some(FrameLimit::Fps120));
-        assert_eq!(cli.stutter_fix, Some(false));
-    }
-
-    #[test]
-    fn refused_options_keep_their_messages() {
-        let args =
-            |list: &[&str]| Settings::parse_args(list.iter().map(|a| a.to_string())).unwrap_err();
-        assert_eq!(
-            args(&["--bogus"]),
-            format!("unknown option --bogus\n\n{USAGE}")
-        );
-        assert_eq!(
-            args(&["--game"]),
-            format!("--game needs a value\n\n{USAGE}")
-        );
-        assert_eq!(args(&["--vsync", "maybe"]), "invalid vsync value maybe");
-        assert_eq!(args(&["--stutter-fix", "x"]), "invalid stutter-fix value x");
-        assert_eq!(
-            args(&["--frame-limit", "7"]),
-            format!("invalid frame limit 7\n\n{USAGE}")
-        );
-        assert_eq!(
-            args(&["--resolution", "huge"]),
-            format!("invalid resolution huge\n\n{USAGE}")
-        );
-        assert_eq!(
-            args(&["--language", "Klingon"]),
-            format!("invalid language Klingon\n\n{USAGE}")
-        );
-    }
-
-    #[test]
-    fn frame_limits_map_to_d3d9_values() {
-        assert_eq!(FrameLimit::Fps60.fps(), Some(60));
-        assert_eq!(FrameLimit::Fps120.fps(), Some(120));
-        assert_eq!(FrameLimit::Off.fps(), None);
     }
 }

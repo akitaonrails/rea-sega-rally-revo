@@ -12,6 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 rea-launcher.workspace = true
+# Takes the D3DX9 DLLs out of Microsoft's DirectX package (MIT).
+cab = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 rea-launcher-win32.workspace = true

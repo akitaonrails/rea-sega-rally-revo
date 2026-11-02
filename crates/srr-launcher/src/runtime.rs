@@ -17,6 +17,10 @@ pub const MANIFEST: &str = ".srr-manifest";
 /// The marker `SRRLauncher` leaves next to the DXVK `d3d9.dll` it installs.
 pub const DXVK_MARKER: &str = ".srr-dxvk";
 
+/// The record of the `config.ini` values the launcher wrote
+/// (`rea_launcher::ini::Owned`).
+pub const CONFIG_OWNED: &str = ".srr-config-owned";
+
 /// Files the launcher owns in the runtime copy and a sync must never
 /// overwrite: the `dxvk.conf` it writes and its own bookkeeping, always;
 /// `d3d9.dll` only while the launcher manages DXVK there (`dxvk_managed`:
@@ -24,7 +28,13 @@ pub const DXVK_MARKER: &str = ".srr-dxvk";
 /// `d3d9.dll` (ReShade, dgVoodoo, DXVK for Windows) is copied like any
 /// other game file.
 pub fn is_owned(rel: &str, dxvk_managed: bool) -> bool {
-    const OWNED: [&str; 3] = ["dxvk.conf", MANIFEST, DXVK_MARKER];
+    const OWNED: [&str; 5] = [
+        "dxvk.conf",
+        MANIFEST,
+        DXVK_MARKER,
+        CONFIG_OWNED,
+        crate::directx::LEDGER,
+    ];
     OWNED.iter().any(|name| rel.eq_ignore_ascii_case(name))
         || (dxvk_managed && rel.eq_ignore_ascii_case("d3d9.dll"))
 }

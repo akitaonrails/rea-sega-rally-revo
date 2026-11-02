@@ -2,17 +2,16 @@
 
 #[cfg(any(windows, test))]
 mod palette;
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 mod ui;
 
 #[cfg(windows)]
 fn main() {
-    use rea_launcher_win32::dialog::{self, Icon};
     let code = match app::run() {
         Ok(code) => code,
         Err(error) => {
             app::log_line(&format!("error: {error}"));
-            dialog::message("Sega Rally Revo launcher", &error, Icon::Error);
+            app::report("Sega Rally Revo launcher", &error, true);
             1
         }
     };
@@ -30,17 +29,19 @@ mod app {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::sync::OnceLock;
 
+    use rea_launcher::identify;
+    use rea_launcher::ini::Owned;
     use rea_launcher::log::Log;
     use rea_launcher::{cfg, fsx, paths};
     use rea_launcher_win32::dialog::{self, Icon};
     use rea_launcher_win32::reg::Key;
-    use rea_launcher_win32::{display as screen, gpu, wine, xinput};
+    use rea_launcher_win32::{console, disk, display as screen, gpu, http, wine, xinput};
     use srr_launcher::config::{self, Settings};
-    use srr_launcher::edition;
-    use srr_launcher::form::Picture;
-    use srr_launcher::gamecfg;
-    use srr_launcher::{display, patches, runtime};
+    use srr_launcher::edition::{self, GameEditions};
+    use srr_launcher::plan::{self, Env};
+    use srr_launcher::{directx, gamecfg, patches, runtime};
 
     use crate::ui;
 
@@ -53,8 +54,38 @@ mod app {
             .join("SRRLauncher")
     }
 
+    /// Where the DirectX 9 files are kept after the player downloads them.
+    pub fn directx_root() -> PathBuf {
+        home().join("directx")
+    }
+
     pub fn log_line(line: &str) {
         Log::new(home().join("launcher.log")).line(line);
+    }
+
+    /// Whether the run has a terminal (attached once, on first use).
+    fn terminal() -> bool {
+        static ATTACHED: OnceLock<bool> = OnceLock::new();
+        *ATTACHED.get_or_init(console::attach_parent)
+    }
+
+    /// Text for the player: the terminal the launcher was started from, a
+    /// message box when a person started it without one, else only the log.
+    pub fn report(title: &str, text: &str, error: bool) {
+        match console::output(terminal(), console::stdout_usable(), true) {
+            console::Output::Terminal => {
+                if error {
+                    eprintln!("{text}");
+                } else {
+                    println!("{text}");
+                }
+            }
+            console::Output::Dialog => {
+                let icon = if error { Icon::Error } else { Icon::Info };
+                dialog::message(title, text, icon);
+            }
+            console::Output::Nowhere => {}
+        }
     }
 
     fn settings_path() -> PathBuf {
@@ -71,23 +102,16 @@ mod app {
         if let Some(game) = &settings.game {
             return Ok(game.clone());
         }
-        if let Some(dir) = std::env::current_exe()
-            .ok()
-            .and_then(|path| path.parent().map(Path::to_path_buf))
+        if let Some(dir) = launcher_dir()
             && (dir.join(edition::MAIN_EXE).is_file() || dir.join(edition::SSE1_EXE).is_file())
         {
             return Ok(dir);
         }
         Err(format!(
-            "Choose the folder containing SEGA Rally.exe or {}, or run:\n\nSRRLauncher --game <folder>",
+            "Choose the folder containing {} or {}, or run:\n\nSRRLauncher --game <folder>",
+            edition::MAIN_EXE,
             edition::SSE1_EXE
         ))
-    }
-
-    fn take_flag(args: &mut Vec<String>, flag: &str) -> bool {
-        let found = args.iter().any(|arg| arg == flag);
-        args.retain(|arg| arg != flag);
-        found
     }
 
     fn launcher_dir() -> Option<PathBuf> {
@@ -127,27 +151,70 @@ mod app {
         }
         fsx::install(&marker, b"d3d9.dll is managed by SRRLauncher\n")
             .map_err(|error| error.to_string())?;
+        log_line(&format!(
+            "dxvk: d3d9.dll installed (SHA-256 {})",
+            identify::sha256_file(&destination)
+                .map(|digest| identify::hex(&digest))
+                .unwrap_or_else(|_| "unreadable".into())
+        ));
         Ok(())
-    }
-
-    fn read_exe(dir: &Path, name: &str) -> Option<Vec<u8>> {
-        fs::read(dir.join(name)).ok()
-    }
-
-    fn write_exe(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
-        fsx::install(&dir.join(name), bytes)
-            .map_err(|error| format!("cannot write the private copy of {name}: {error}"))
     }
 
     /// Writes the game's install values under `HKLM\SOFTWARE\Sega\SEGA
     /// Rally` (its 32-bit view), or its HKCU VirtualStore twin when native
     /// Windows refuses HKLM without elevation; 32-bit games read either.
-    fn seed_game_registry(values: &[(&str, String)]) -> Result<&'static str, String> {
+    fn seed_game_registry(values: &[gamecfg::RegValue]) -> Result<&'static str, String> {
         let (key, place) = Key::machine_or_virtual_store(r"SOFTWARE\Sega\SEGA Rally")?;
-        for (name, value) in values {
-            key.set_string(name, value)?;
+        for value in values {
+            if value.if_missing {
+                key.set_string_if_missing(value.name, &value.value)?;
+            } else {
+                key.set_string(value.name, &value.value)?;
+            }
         }
         Ok(place.describe())
+    }
+
+    /// `--download-directx`: the window's DirectX download without the
+    /// window, logging progress every 10 percent.
+    fn download_directx() -> Result<u32, String> {
+        let pin = directx::pin();
+        let root = directx_root();
+        if directx::installed(&pin, &root).is_some() {
+            let note = "DirectX 9 files: already downloaded";
+            log_line(note);
+            report("Sega Rally Revo launcher", note, false);
+            return Ok(0);
+        }
+        let progress = std::sync::Arc::new(directx::Progress::default());
+        let worker = progress.clone();
+        let handle = std::thread::spawn(move || {
+            let fetch = http::WinHttp::new(concat!("SRRLauncher/", env!("CARGO_PKG_VERSION")));
+            directx::install(&pin, &root, &disk::free_space, &fetch, &worker)
+        });
+        let mut logged = None;
+        while !handle.is_finished() {
+            if let rea_launcher::download::Phase::Downloading { done, total } = progress.job.phase()
+            {
+                let tenth = done * 10 / total.max(1);
+                if logged != Some(tenth) {
+                    log_line(&format!("directx: downloading {}%", tenth * 10));
+                    logged = Some(tenth);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        let dir = handle
+            .join()
+            .map_err(|_| "the download stopped unexpectedly".to_string())??;
+        let note = format!(
+            "DirectX 9 files: {} DLLs in {}; they go into the private copy at the next launch",
+            directx::dlls(&dir).len(),
+            dir.display()
+        );
+        log_line(&note);
+        report("Sega Rally Revo launcher", &note, false);
+        Ok(0)
     }
 
     const WINDOW_CLOSED: u32 = 3;
@@ -156,24 +223,30 @@ mod app {
     pub fn run() -> Result<u32, String> {
         log_line(concat!("SRRLauncher ", env!("CARGO_PKG_VERSION")));
         let settings_path = settings_path();
-        let mut cli: Vec<String> = std::env::args().skip(1).collect();
-        if take_flag(&mut cli, "--help") {
-            dialog::message("Sega Rally Revo launcher", config::USAGE, Icon::Info);
-            return Ok(0);
+        // Validated up front, so a typo is reported even when the window
+        // opens instead of playing.
+        let cli = match Settings::parse_args(std::env::args().skip(1)) {
+            Ok(cli) => cli,
+            Err(message) if message == config::usage() => {
+                report("Sega Rally Revo launcher", &message, false);
+                return Ok(0);
+            }
+            Err(message) => return Err(message),
+        };
+        let settings_only = cli.has("--settings");
+        let linux = cli.has("--linux");
+        let no_window = cli.has("--no-window");
+        let check_only = cli.has("--check");
+        let setup_only = cli.has("--setup");
+        if cli.has("--download-directx") {
+            return download_directx();
         }
-        let settings_only = take_flag(&mut cli, "--settings");
-        let linux = take_flag(&mut cli, "--linux");
-        let no_window = take_flag(&mut cli, "--no-window");
-        let check_only = take_flag(&mut cli, "--check");
-        let setup_only = take_flag(&mut cli, "--setup");
-        // Validate options up front, so a typo is reported even when the
-        // window opens instead of playing.
-        let overrides = Settings::parse_args(cli.clone())?;
-        if settings_only && !cli.is_empty() {
-            return Err(format!(
-                "--settings opens the window and takes no other options (got {})",
-                cli.join(" ")
-            ));
+        if settings_only && cli.options_given() {
+            return Err(
+                "--settings opens the window and takes no other options; save them in the \
+                 window or launcher.cfg"
+                    .to_string(),
+            );
         }
         // Before any window or game: the settings window's pad navigation
         // and the game both read XInput through Wine's bus.
@@ -186,7 +259,9 @@ mod app {
                 Err(error) => log_line(&format!("warning: {error}")),
             }
         }
-        if settings_only || (cli.is_empty() && !no_window && !check_only && !setup_only) {
+        let wants_window =
+            settings_only || (!cli.options_given() && !no_window && !check_only && !setup_only);
+        if wants_window {
             if wine::is_wine() {
                 match gpu::prefer_glx() {
                     Ok(true) => log_line("Wine settings window: OpenGL through GLX (UseEGL=N)"),
@@ -195,13 +270,15 @@ mod app {
                 }
             }
             let saved = cfg::read_file(&settings_path).ok().flatten();
-            match ui::show(&settings_path, saved.as_deref(), linux) {
+            match ui::show(&settings_path, &directx_root(), saved.as_deref(), linux) {
                 Ok(ui::Outcome::Play) => {
+                    log_line("settings window: play");
                     if settings_only {
                         return Ok(0);
                     }
                 }
                 Ok(ui::Outcome::Closed) => {
+                    log_line("settings window: closed");
                     return Ok(if settings_only { WINDOW_CLOSED } else { 0 });
                 }
                 Err(error) => {
@@ -214,53 +291,49 @@ mod app {
         }
 
         let existing = cfg::read_file(&settings_path).ok().flatten();
-        let file_text = existing.as_deref().unwrap_or(config::TEMPLATE);
+        let template = config::template();
+        let file_text = existing.as_deref().unwrap_or(&template);
         let (saved, warnings) = Settings::parse_file(file_text);
         for warning in warnings {
             log_line(&format!("warning: {warning}"));
         }
-        let settings = saved.clone().merged(overrides);
+        let settings = saved.clone().merged(cli.settings.clone());
         let game = find_game(&settings)?;
 
+        let read_exe = |dir: &Path, name: &str| fs::read(dir.join(name)).ok();
         let main_bytes = read_exe(&game, edition::MAIN_EXE);
         let sse1_bytes = read_exe(&game, edition::SSE1_EXE);
-        let mut editions = edition::GameEditions {
-            main: edition::identify(main_bytes.as_deref().unwrap_or(&[])),
-            sse1: edition::identify(sse1_bytes.as_deref().unwrap_or(&[])),
-        };
-        if !editions.playable() {
-            let unknown = editions
-                .unknown_note()
-                .unwrap_or_else(|| "no known executable".into());
-            return Err(format!(
-                "This launcher supports the Sega Rally Revo PC v4.0.6.0 build \
-                 (the clean SEGA Rally_SSE1.exe or the full-rip NoDVD SEGA Rally.exe).\n\n{unknown}"
-            ));
+        let editions = GameEditions::from_bytes(main_bytes.as_deref(), sse1_bytes.as_deref());
+        for (name, found) in [
+            (edition::MAIN_EXE, editions.main),
+            (edition::SSE1_EXE, editions.sse1),
+        ] {
+            match found {
+                Some(Ok(known)) => log_line(&format!(
+                    "{name}: {} (SHA-256 {})",
+                    known.name,
+                    identify::hex(&known.sha256)
+                )),
+                Some(Err(digest)) => log_line(&format!(
+                    "{name}: unknown build, SHA-256 {}; never patched",
+                    identify::hex(&digest)
+                )),
+                None => log_line(&format!("{name}: not in the game folder")),
+            }
         }
-        log_line(&format!(
-            "game: {} ({})",
-            game.display(),
-            [editions.main.ok(), editions.sse1.ok()]
-                .into_iter()
-                .flatten()
-                .map(|edition| edition.name)
-                .collect::<Vec<_>>()
-                .join(" · ")
-        ));
+        if !editions.playable() {
+            return Err(editions.refusal());
+        }
+        log_line(&format!("game: {}", game.display()));
         if check_only {
-            dialog::message(
+            report(
                 "Sega Rally Revo launcher",
                 &format!(
-                    "Ready to set up.\n\nGame folder: {}\n{}",
+                    "Ready to play.\n\nGame folder: {}\n{}",
                     game.display(),
-                    [editions.main.ok(), editions.sse1.ok()]
-                        .into_iter()
-                        .flatten()
-                        .map(|edition| edition.name)
-                        .collect::<Vec<_>>()
-                        .join("\n")
+                    editions.names().join("\n")
                 ),
-                Icon::Info,
+                false,
             );
             return Ok(0);
         }
@@ -275,17 +348,16 @@ mod app {
             // so the sync brings the player's own d3d9.dll (if any) back.
             configure_dxvk(&runtime_dir, false)?;
         }
-        let report = runtime::sync(&game, &runtime_dir, linux)
+        let report_sync = runtime::sync(&game, &runtime_dir, linux)
             .map_err(|error| format!("cannot prepare {}: {error}", runtime_dir.display()))?;
-        for warning in &report.warnings {
+        for warning in &report_sync.warnings {
             log_line(&format!("warning: {warning}"));
         }
         log_line(&format!(
             "runtime: {} ({} files copied)",
             runtime_dir.display(),
-            report.brought
+            report_sync.brought
         ));
-
         let renamed = runtime::disable_bootup_videos(&runtime_dir);
         if renamed > 0 {
             log_line(&format!(
@@ -293,119 +365,26 @@ mod app {
             ));
         }
 
-        // Stutter fix: apply the pacer patch to the private SSE1 copy.
-        let mut pacer_done = false;
-        let mut stutter_fix = settings.effective_stutter_fix();
-        if stutter_fix && !editions.pacer_available() {
-            log_line(
-                "stutter fix: requested but the clean SEGA Rally_SSE1.exe is not present; \
-                 running unpatched",
-            );
-            stutter_fix = false;
+        // The DirectX 9 files the player downloaded, if any.
+        let directx_dir = directx::installed(&directx::pin(), &directx_root());
+        let placed = directx::place(&game, &runtime_dir, directx_dir.as_deref())
+            .map_err(|error| format!("cannot place the DirectX 9 files: {error}"))?;
+        if !placed.installed.is_empty() {
+            log_line(&format!(
+                "directx: {} D3DX9 file(s) in the private copy",
+                placed.installed.len()
+            ));
         }
-        if stutter_fix {
-            let mut bytes = read_exe(&runtime_dir, edition::SSE1_EXE)
-                .ok_or("the private SSE1 copy disappeared")?;
-            // A previous ultra-wide launch rewrote the aspect tables; judge the
-            // build without them (the aspect step below sets them again).
-            match patches::identify_ignoring_aspect(&bytes) {
-                Ok(edition) if std::ptr::eq(edition, &edition::SSE1_PACER) => {
-                    pacer_done = true;
-                    log_line("stutter fix: already applied to the private copy");
-                }
-                Ok(edition) if std::ptr::eq(edition, &edition::SSE1_CLEAN) => {
-                    let _ = patches::aspect(&mut bytes, 16.0 / 9.0);
-                    match patches::pacer_verified(&mut bytes) {
-                        Ok(true) => {
-                            write_exe(&runtime_dir, edition::SSE1_EXE, &bytes)?;
-                            pacer_done = true;
-                            log_line("stutter fix: pacer patch applied to the private copy");
-                        }
-                        Ok(false) => {
-                            pacer_done = true;
-                        }
-                        Err(error) => return Err(format!("stutter fix: {error}")),
-                    }
-                }
-                _ => {
-                    return Err(
-                        "stutter fix: the private SSE1 copy is not the clean build".to_string()
-                    );
-                }
-            }
+        for name in &placed.not_ours {
+            log_line(&format!(
+                "directx: {name} in the private copy is not ours; kept"
+            ));
         }
-        editions.sse1 = patches::identify_ignoring_aspect(
-            &read_exe(&runtime_dir, edition::SSE1_EXE).ok_or("cannot re-read the SSE1 copy")?,
-        );
-
-        // The exe this run launches: the patched SSE1 build when the fix is
-        // active, otherwise the rip's main NoDVD exe when present.
-        let launch_name = if pacer_done {
-            edition::SSE1_EXE
-        } else if editions.main.is_ok() {
-            edition::MAIN_EXE
-        } else {
-            edition::SSE1_EXE
-        };
-        log_line(&format!("launch executable: {launch_name}"));
-
-        let screen = screen::screen_size();
-        let picture = Picture {
-            resolution: settings.resolution,
-            aspect: settings.aspect,
-            quality: settings.effective_quality(),
-            vsync: settings.vsync.unwrap_or(true),
-        }
-        .resolved(screen);
-        let wine = wine::is_wine();
-        let gamescope = std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_some();
-        let (width, height) = picture.resolution.unwrap();
-        let mode_supported = wine || screen::mode_supported(width, height);
-        let display_plan = display::plan(
-            wine,
-            gamescope,
-            screen.is_some_and(|(width, height)| width < height),
-            mode_supported,
-        );
-        match display_plan {
-            display::Plan::Fullscreen => {}
-            display::Plan::WineDesktop => log_line(&format!(
-                "display: using an isolated Wine desktop at {width}x{height}"
-            )),
-            display::Plan::WarnPortrait => log_line(
-                "warning: the current monitor is portrait; the game's fullscreen switch may fail",
-            ),
-            display::Plan::WarnUnsupportedMode => log_line(&format!(
-                "warning: the monitor has no {width}x{height} mode; the game's fullscreen switch may fail"
-            )),
-        }
-
-        // Aspect tables: patch every game exe in the runtime so the choice
-        // survives a later switch between the SSE1 and NoDVD builds.
-        let aspect = settings.effective_aspect(screen);
-        if !patches::is_native_aspect(aspect.ratio()) {
-            for name in [edition::MAIN_EXE, edition::SSE1_EXE] {
-                if let Some(mut bytes) = read_exe(&runtime_dir, name) {
-                    let written = patches::aspect(&mut bytes, aspect.ratio())
-                        .map_err(|error| format!("aspect patch: {error}"))?;
-                    if written > 0 {
-                        write_exe(&runtime_dir, name, &bytes)?;
-                        log_line(&format!(
-                            "aspect: {} patched into {written} table(s) of {name}",
-                            aspect.key()
-                        ));
-                    }
-                }
-            }
-        } else if let Some(mut bytes) = read_exe(&runtime_dir, launch_name) {
-            let restored = patches::aspect(&mut bytes, 16.0 / 9.0)
-                .map_err(|error| format!("aspect restore: {error}"))?;
-            if restored > 0 {
-                write_exe(&runtime_dir, launch_name, &bytes)?;
-                log_line(&format!(
-                    "aspect: restored the native 16:9 constant in {restored} table(s)"
-                ));
-            }
+        if !placed.removed.is_empty() {
+            log_line(&format!(
+                "directx: {} file(s) taken out of the private copy",
+                placed.removed.len()
+            ));
         }
 
         // The game's own configuration, written the way the original .NET
@@ -422,90 +401,151 @@ mod app {
                     .map(|parent| parent.join("Public"))
                     .unwrap_or_else(|| profile.clone())
             });
-        let paths = gamecfg::documents_paths(&profile, &public);
-        for dir in [&paths.saved_games, &paths.rank_table, &paths.ghosts] {
+        let documents = gamecfg::documents_paths(&profile, &public);
+        let config_path = documents.saved_games.join("config.ini");
+        let config_read = fs::read(&config_path);
+        let screen = screen::screen_size();
+        let wine = wine::is_wine();
+        let env = Env {
+            wine,
+            linux,
+            gamescope: std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_some(),
+            screen,
+            mode_supported: true,
+            config_resolution: config_read
+                .as_ref()
+                .ok()
+                .and_then(|bytes| gamecfg::resolution_in(bytes)),
+            dll_overrides: std::env::var("WINEDLLOVERRIDES").ok(),
+            directx: directx_dir
+                .as_deref()
+                .map(directx::dlls)
+                .unwrap_or_default(),
+            runtime: runtime_dir.display().to_string(),
+        };
+        let mut plan = plan::plan(&settings, &editions, &env);
+        if !wine && !screen::mode_supported(plan.resolution.0, plan.resolution.1) {
+            plan = plan::plan(
+                &settings,
+                &editions,
+                &Env {
+                    mode_supported: false,
+                    ..env
+                },
+            );
+        }
+        for note in &plan.notes {
+            log_line(note);
+        }
+
+        // Patches: from the game folder's pristine bytes into the private
+        // copy, every launch, so a choice switched off needs no restore.
+        for (name, sets) in &plan.patches {
+            let pristine = if *name == edition::MAIN_EXE {
+                main_bytes.as_deref()
+            } else {
+                sse1_bytes.as_deref()
+            }
+            .ok_or("a game executable disappeared")?;
+            let patched = patches::apply(pristine, sets)
+                .map_err(|error| format!("{name}: {} refused: {error}", patches::names(sets)))?;
+            let target = runtime_dir.join(name);
+            if fs::read(&target).ok().as_deref() != Some(&patched[..]) {
+                fsx::install(&target, &patched)
+                    .map_err(|error| format!("cannot write the private copy of {name}: {error}"))?;
+            }
+            log_line(&format!(
+                "{name}: patches {} (SHA-256 {})",
+                patches::names(sets),
+                identify::hex(&identify::sha256(&patched))
+            ));
+        }
+        log_line(&format!("launch executable: {}", plan.launch));
+        match plan.display {
+            srr_launcher::display::Plan::Fullscreen => {}
+            srr_launcher::display::Plan::WineDesktop => log_line(&format!(
+                "display: an isolated Wine desktop at {}x{}",
+                plan.resolution.0, plan.resolution.1
+            )),
+            srr_launcher::display::Plan::WarnPortrait => log_line(
+                "warning: the current monitor is portrait; the game's fullscreen switch may fail",
+            ),
+            srr_launcher::display::Plan::WarnUnsupportedMode => log_line(&format!(
+                "warning: the monitor has no {}x{} mode; the game's fullscreen switch may fail",
+                plan.resolution.0, plan.resolution.1
+            )),
+        }
+
+        for dir in [
+            &documents.saved_games,
+            &documents.rank_table,
+            &documents.ghosts,
+        ] {
             fs::create_dir_all(dir)
                 .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
         }
         // Earlier releases built config.ini at `config.ini.srr-tmp`.
-        if let Err(error) = fsx::remove_stale_temps(&paths.saved_games, &[gamecfg::OLD_TEMP_SUFFIX])
+        if let Err(error) =
+            fsx::remove_stale_temps_here(&documents.saved_games, &[gamecfg::OLD_TEMP_SUFFIX])
         {
             log_line(&format!("warning: {error}"));
         }
-        let config_path = paths.saved_games.join("config.ini");
-        // Seed only a missing file; a file that cannot be read is the
-        // player's and is left exactly as it is.
-        match gamecfg::next_config(
-            fs::read(&config_path),
-            picture.resolution.unwrap(),
-            picture.quality,
-            picture.vsync,
-        ) {
-            Ok(bytes) => fsx::write_atomic(&config_path, bytes)
-                .map_err(|error| format!("cannot write {}: {error}", config_path.display()))?,
+        let owned_path = runtime_dir.join(runtime::CONFIG_OWNED);
+        let mut owned = Owned::load(&owned_path).unwrap_or_default();
+        let seeded = config_read.is_err();
+        match gamecfg::next_config(config_read, plan.seed, &plan.graphics, &mut owned) {
+            Ok(bytes) => {
+                fsx::write_atomic(&config_path, bytes)
+                    .map_err(|error| format!("cannot write {}: {error}", config_path.display()))?;
+                owned
+                    .save(&owned_path)
+                    .map_err(|error| format!("cannot save {}: {error}", owned_path.display()))?;
+                log_line(&format!(
+                    "config.ini: {} ({}x{}; set in launcher.cfg: {:?})",
+                    if seeded { "seeded" } else { "updated" },
+                    plan.resolution.0,
+                    plan.resolution.1,
+                    plan.graphics
+                ));
+            }
             Err(error) => log_line(&format!(
                 "warning: cannot read {} ({error}); left unchanged",
                 config_path.display()
             )),
         }
         for file in [
-            (paths.saved_games.join("SEGA Rally.dat"), "save file"),
-            (paths.rank_table.join("SR_RANKTABLES.DAT"), "rank table"),
+            (documents.saved_games.join("SEGA Rally.dat"), "save file"),
+            (documents.rank_table.join("SR_RANKTABLES.DAT"), "rank table"),
         ] {
             if !file.0.exists() && fs::write(&file.0, b"").is_err() {
                 return Err(format!("cannot seed the {}", file.1));
             }
         }
-        log_line(&format!(
-            "configured: {}x{} {}, {}, vsync {}",
-            picture.resolution.unwrap().0,
-            picture.resolution.unwrap().1,
-            aspect.key(),
-            picture.quality.key(),
-            picture.vsync,
-        ));
 
-        // Registry values the game reads before it will start.
-        let runtime_windows = runtime_dir.display().to_string();
-        let values = gamecfg::registry_values(&runtime_windows, &settings.effective_language());
-        match seed_game_registry(&values) {
+        match seed_game_registry(&plan.registry) {
             Ok(place) => log_line(&format!(
-                "registry: installdir + language {} seeded ({place})",
+                "registry: installdir, sku and language ({}) written ({place})",
                 settings.effective_language()
             )),
             Err(error) => log_line(&format!("warning: {error}")),
         }
 
-        if linux {
+        if plan.install_dxvk {
             configure_dxvk(&runtime_dir, true)?;
         }
-        let dxvk_conf = runtime_dir.join("dxvk.conf");
-        // Any DXVK reads dxvk.conf from the game folder: ours (srr-play,
-        // AppImage) or Proton's own when Steam starts the launcher directly.
-        if linux || wine {
-            fsx::install(
-                &dxvk_conf,
-                gamecfg::dxvk_conf(settings.effective_frame_limit().fps()),
-            )
-            .map_err(|error| format!("cannot write dxvk.conf: {error}"))?;
-            log_line(&format!(
-                "dxvk: frame limit {}",
-                settings
-                    .effective_frame_limit()
-                    .fps()
-                    .map(|fps| fps.to_string())
-                    .unwrap_or_else(|| "off".into())
-            ));
+        if let Some(conf) = &plan.dxvk_conf {
+            fsx::install(&runtime_dir.join("dxvk.conf"), conf)
+                .map_err(|error| format!("cannot write dxvk.conf: {error}"))?;
+            log_line(&format!("dxvk.conf: {}", conf.trim()));
         }
 
         if existing.is_none() || saved.game.as_ref() != Some(&game) {
-            let text = cfg::set_key(file_text, "game", &game.display().to_string());
+            let text = config::set_key(file_text, "game", &game.display().to_string());
             fsx::write_atomic(&settings_path, text)
                 .map_err(|error| format!("cannot save {}: {error}", settings_path.display()))?;
         }
-        if !wine::is_wine() {
-            let runtime_exe = runtime_dir.join(launch_name);
-            match gpu::prefer_fast_gpu(&runtime_exe) {
+        if plan.gpu_preference {
+            match gpu::prefer_fast_gpu(&runtime_dir.join(plan.launch)) {
                 Ok(true) => log_line("Windows high-performance GPU preference set"),
                 Ok(false) => {}
                 Err(error) => log_line(&format!("warning: {error}")),
@@ -516,29 +556,16 @@ mod app {
             return Ok(0);
         }
 
-        let runtime_exe = runtime_dir.join(launch_name);
-        let mut command = if display_plan == display::Plan::WineDesktop {
-            let mut command = Command::new("explorer");
-            command
-                .arg(format!("/desktop=SegaRally,{width}x{height}"))
-                .arg(&runtime_exe);
-            command
-        } else {
-            Command::new(&runtime_exe)
-        };
-        // Under Wine, make sure the DXVK d3d9.dll installed above is the one
-        // loaded (the isolated desktop's explorer passes this on).
-        if wine || linux {
-            let existing = std::env::var("WINEDLLOVERRIDES").ok();
-            if let Some(overrides) = gamecfg::wine_overrides(existing.as_deref(), linux) {
-                log_line(&format!("wine: DLL overrides {overrides}"));
-                command.env("WINEDLLOVERRIDES", overrides);
-            }
+        let mut command = Command::new(&plan.command[0]);
+        command.args(&plan.command[1..]);
+        if let Some(overrides) = &plan.dll_overrides {
+            log_line(&format!("wine: DLL overrides {overrides}"));
+            command.env("WINEDLLOVERRIDES", overrides);
         }
         let status = command
             .current_dir(&runtime_dir)
             .status()
-            .map_err(|error| format!("cannot start {}: {error}", runtime_exe.display()))?;
+            .map_err(|error| format!("cannot start {}: {error}", plan.command.join(" ")))?;
         xinput::stop_rumble();
         let code = status.code().unwrap_or(1) as u32;
         log_line(&format!("game exited with {code}"));

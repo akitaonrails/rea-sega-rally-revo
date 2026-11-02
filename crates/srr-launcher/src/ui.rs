@@ -1,19 +1,25 @@
+//! The settings window. The drawing is plain egui over a [`Host`] (the
+//! Win32 calls it needs, as closures), so the headless tests drive the
+//! real window on the host and under `sdk/scripts/wine-test`.
+
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rea_launcher::fsx;
-use rea_launcher_ui::eframe;
-use rea_launcher_ui::egui::{self, Align2, Key, Rect, TextureHandle, pos2, vec2};
+use rea_launcher_ui::download::{Download, DownloadAction, DownloadState, download_row};
+use rea_launcher_ui::egui::{self, Align2, Key, Rect, Response, TextureHandle, pos2, vec2};
 use rea_launcher_ui::pad::{self, Nav, PadNav};
-use rea_launcher_ui::theme::{self, body, decal, semibold};
-use rea_launcher_ui::widgets::{self, Crop, LookCard};
-use rea_launcher_ui::window::{Layout, SIZE, WindowFit};
-use rea_launcher_win32::{dialog, display, wine, xinput};
-use srr_launcher::config::{self, FrameLimit, LANGUAGES, Quality};
-use srr_launcher::edition;
+use rea_launcher_ui::spec::mark_rendered;
+use rea_launcher_ui::theme::{body, decal, semibold};
+use rea_launcher_ui::widgets::{self, Chip, Crop, LookCard};
+use rea_launcher_ui::window::Layout;
+use srr_launcher::config::{self, Aspect, FrameLimit, LANGUAGES, Quality};
+use srr_launcher::directx::{self, After, Progress};
+use srr_launcher::edition::{self, GameEditions};
 use srr_launcher::form::{self, Form, Look, Picture};
 
-use crate::palette::{BLUE, ERROR, INK, METRICS, MUTED, ORANGE, PALETTE};
+use crate::palette::{BLUE, ERROR, INK, MUTED, ORANGE};
 
 const PHOTO_W: f32 = 300.0;
 
@@ -23,41 +29,27 @@ pub enum Outcome {
     Closed,
 }
 
-pub fn show(settings_path: &Path, saved: Option<&str>, linux: bool) -> Result<Outcome, String> {
-    let mut outcome = Outcome::Closed;
-    let wine = wine::is_wine();
-    // Under Wine the window is created at its final size (XWayland can
-    // lose a later resize). Wine then scales the window by its own DPI
-    // setting, so that is divided out; the DPI scale is read first, as it
-    // also makes the process DPI aware before the screen size is taken.
-    // On Windows the window keeps its 1x creation size.
-    let native = display::wine_dpi_scale();
-    let fit = WindowFit::new(SIZE, wine, display::screen_size(), native);
-    let zoom = fit.zoom();
-    let options = fit.native_options("Sega Rally Revo");
-    let path = settings_path.to_path_buf();
-    let saved = saved.map(str::to_string);
-    eframe::run_native(
-        "Sega Rally Revo",
-        options,
-        Box::new(|cc| {
-            theme::install_with(&cc.egui_ctx, &PALETTE, &METRICS);
-            cc.egui_ctx.set_zoom_factor(zoom);
-            Ok(Box::new(Window::new(
-                &cc.egui_ctx,
-                path,
-                saved,
-                linux,
-                &mut outcome,
-            )))
-        }),
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(outcome)
+/// What the window needs from the system.
+pub struct Host {
+    pub screen: Option<(u32, u32)>,
+    /// Linux helper (`--linux`): hints use Wine's `Z:` drive.
+    pub linux: bool,
+    /// DXVK will run the game (Linux helper, Wine or Proton).
+    pub dxvk: bool,
+    pub pads: usize,
+    pub pick_folder: Box<dyn Fn() -> Option<PathBuf>>,
+    /// Rumbles every pad briefly; how many took it.
+    pub test_rumble: Box<dyn Fn() -> usize>,
+    /// The XInput buttons held now (for pad navigation).
+    pub buttons: Box<dyn Fn() -> u16>,
+    /// Where the DirectX 9 files are kept.
+    pub directx_root: PathBuf,
+    /// Starts the DirectX download on a worker thread.
+    pub start_download: Box<dyn Fn(Arc<Progress>)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Tab {
+pub enum Tab {
     Play,
     Picture,
     Controls,
@@ -77,7 +69,7 @@ impl Tab {
     }
 }
 
-enum Check {
+pub enum Check {
     Empty,
     Found {
         names: Vec<&'static str>,
@@ -86,7 +78,7 @@ enum Check {
     Problem(String),
 }
 
-fn check_game(folder: &str) -> Check {
+pub fn check_game(folder: &str) -> Check {
     let folder = folder.trim();
     if folder.is_empty() {
         return Check::Empty;
@@ -96,97 +88,57 @@ fn check_game(folder: &str) -> Check {
         return Check::Problem("No such folder.".into());
     }
     let read = |name: &str| std::fs::read(dir.join(name)).ok();
-    let main = read(edition::MAIN_EXE);
-    let sse1 = read(edition::SSE1_EXE);
-    if main.is_none() && sse1.is_none() {
-        return Check::Problem(
-            "There is no SEGA Rally.exe or SEGA Rally_SSE1.exe in this folder.".into(),
-        );
-    }
-    let mut editions = edition::GameEditions {
-        main: Err([0; 32]),
-        sse1: Err([0; 32]),
-    };
-    if let Some(bytes) = &main {
-        editions.main = edition::identify(bytes);
-    }
-    if let Some(bytes) = &sse1 {
-        editions.sse1 = edition::identify(bytes);
-    }
+    let (main, sse1) = (read(edition::MAIN_EXE), read(edition::SSE1_EXE));
+    let editions = GameEditions::from_bytes(main.as_deref(), sse1.as_deref());
     if editions.playable() {
-        let mut names = Vec::new();
-        if let Ok(edition) = editions.main {
-            names.push(edition.name);
-        }
-        if let Ok(edition) = editions.sse1 {
-            names.push(edition.name);
-        }
         Check::Found {
-            names,
+            names: editions.names(),
             pacer: editions.pacer_available(),
         }
     } else {
-        let unknown = editions
-            .unknown_note()
-            .unwrap_or_else(|| "unrecognised executables".into());
-        Check::Problem(format!(
-            "Unsupported game executables.\nThis launcher supports the v4.0.6.0 PC build \
-             (clean SSE1 or the full-rip NoDVD main exe).\n\n{unknown}"
-        ))
+        Check::Problem(editions.refusal())
     }
 }
 
-struct Window<'a> {
-    form: Form,
-    tab: Tab,
+pub struct Window {
+    pub form: Form,
+    pub tab: Tab,
     check: Check,
     checked: String,
-    screen: Option<(u32, u32)>,
     resolutions: Vec<(Option<(u32, u32)>, String)>,
-    pads: usize,
-    linux: bool,
-    /// DXVK will run the game (Linux helper, Wine or Proton).
-    dxvk: bool,
-    portrait: Option<TextureHandle>,
+    host: Host,
+    portrait: Option<Option<TextureHandle>>,
     path: PathBuf,
     text: String,
     error: Option<String>,
     rumble_test: Option<String>,
     pad: PadNav,
     pending: Vec<Nav>,
-    outcome: &'a mut Outcome,
+    download: Option<Arc<Progress>>,
+    pub outcome: Arc<Mutex<Outcome>>,
 }
 
-impl<'a> Window<'a> {
-    fn new(
-        ctx: &egui::Context,
-        path: PathBuf,
-        saved: Option<String>,
-        linux: bool,
-        outcome: &'a mut Outcome,
-    ) -> Window<'a> {
-        let screen = display::screen_size();
-        let form = Form::from_file(saved.as_deref(), screen);
-        let text = saved.unwrap_or_else(|| config::TEMPLATE.to_string());
+impl Window {
+    pub fn new(path: PathBuf, saved: Option<String>, host: Host) -> Window {
+        let form = Form::from_file(saved.as_deref(), host.screen);
+        let text = saved.unwrap_or_else(config::template);
         let check = check_game(&form.game);
         Window {
             checked: form.game.clone(),
             check,
+            resolutions: form::resolutions(host.screen, form.picture.resolution),
             form,
             tab: Tab::Play,
-            screen,
-            resolutions: form::resolutions(screen),
-            pads: xinput::connected(),
-            linux,
-            dxvk: linux || wine::is_wine(),
-            portrait: widgets::load_jpeg(ctx, "portrait", include_bytes!("../assets/portrait.jpg")),
+            host,
+            portrait: None,
             path,
             text,
             error: None,
             rumble_test: None,
             pad: PadNav::default(),
             pending: Vec::new(),
-            outcome,
+            download: None,
+            outcome: Arc::new(Mutex::new(Outcome::Closed)),
         }
     }
 
@@ -210,25 +162,25 @@ impl<'a> Window<'a> {
         }
         // A folder without the clean SSE1 exe only skips the fix at launch;
         // the saved choice stays for when the clean exe is there.
-        let saved = self.form.save(&self.text, self.screen);
+        let saved = self.form.save(&self.text, self.host.screen);
         match fsx::write_atomic(&self.path, saved) {
             Ok(()) => {
-                *self.outcome = Outcome::Play;
+                *self.outcome.lock().unwrap_or_else(|e| e.into_inner()) = Outcome::Play;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Err(error) => self.error = Some(format!("Can't save the settings: {error}")),
         }
     }
-}
 
-impl eframe::App for Window<'_> {
-    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
-        let navs = self.pad.update(xinput::buttons());
+    /// Pad input for this frame (from `raw_input_hook`).
+    pub fn pad_input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let navs = self.pad.update((self.host.buttons)());
         pad::inject(ctx, raw, &navs);
         self.pending.extend(navs);
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    /// The whole window.
+    pub fn draw(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0.0, BLUE);
@@ -257,14 +209,13 @@ impl eframe::App for Window<'_> {
                 Tab::Controls => self.controls_tab(ui),
             });
         });
-        let hint = "The source game is never modified. Settings are saved when you press Play.";
+        let hint = "The game folder is never changed. Settings are saved when you press Play.";
         if widgets::footer(ui, layout.footer, hint, self.ready()).clicked() {
             self.play(&ctx);
         }
         if ctx.input(|input| input.key_pressed(Key::Enter)) && !ctx.egui_wants_keyboard_input() {
             self.play(&ctx);
         }
-        ctx.request_repaint_after(Duration::from_millis(50));
         // Taken, so a second egui pass in one frame cannot play twice.
         for nav in std::mem::take(&mut self.pending) {
             match nav {
@@ -279,12 +230,23 @@ impl eframe::App for Window<'_> {
             self.check = check_game(&self.form.game);
         }
     }
-}
 
-impl Window<'_> {
-    fn draw_photo(&self, ui: &egui::Ui, rect: Rect) {
+    fn draw_photo(&mut self, ui: &egui::Ui, rect: Rect) {
+        let portrait = self
+            .portrait
+            .get_or_insert_with(|| {
+                widgets::load_jpeg(
+                    ui.ctx(),
+                    "portrait",
+                    include_bytes!("../assets/portrait.jpg"),
+                )
+            })
+            .clone();
         let painter = ui.painter();
-        widgets::hero_image(painter, rect, self.portrait.as_ref(), Crop::Start, BLUE);
+        widgets::hero_image(painter, rect, portrait.as_ref(), Crop::Start, BLUE);
+        // The credit sits on a solid backing (no small text over a photo).
+        let backing = Rect::from_min_max(pos2(rect.left(), rect.bottom() - 84.0), rect.max);
+        painter.rect_filled(backing, 0.0, BLUE);
         let x = rect.left() + 20.0;
         let y = rect.bottom() - 20.0;
         painter.text(
@@ -323,41 +285,55 @@ impl Window<'_> {
     }
 
     fn play_tab(&mut self, ui: &mut egui::Ui) {
+        let game = config::option("game");
         widgets::heading(ui, "Game folder (PC v4.0.6.0)");
-        let hint = if self.linux {
-            "The folder with the game, e.g. Z:\\home\\you\\Games\\Sega Rally"
+        mark_rendered(ui.ctx(), game.key);
+        let hint = if self.host.linux {
+            "Game folder, e.g. Z:\\home\\you\\Games\\Sega Rally"
         } else {
-            "The folder with your installed SEGA Rally.exe"
+            "Game folder: the one with SEGA Rally.exe"
         };
-        if widgets::folder_field(ui, &mut self.form.game, hint, || {
-            dialog::pick_folder("Choose the folder with SEGA Rally.exe")
-        }) {
+        let pick = &self.host.pick_folder;
+        if widgets::folder_field(ui, &mut self.form.game, hint, pick) {
             self.error = None;
         }
-        let (note, color) = match &self.check {
-            Check::Empty => (
-                "The source folder is only read, never changed.".to_string(),
-                MUTED,
-            ),
-            Check::Found { names, .. } => (format!("Found: {}", names.join(" · ")), ORANGE),
-            Check::Problem(problem) => (problem.clone(), ERROR),
-        };
-        ui.label(egui::RichText::new(note).font(body(13.0)).color(color));
+        match &self.check {
+            Check::Empty => {
+                widgets::note(ui, game.description);
+            }
+            Check::Found { names, .. } => {
+                ui.label(
+                    egui::RichText::new(format!("Found: {}", names.join(", ")))
+                        .font(body(13.0))
+                        .color(ORANGE),
+                );
+            }
+            Check::Problem(problem) => {
+                widgets::error_note(ui, problem);
+            }
+        }
         ui.add_space(10.0);
 
         widgets::heading(ui, "Look");
+        mark_rendered(ui.ctx(), "look");
         ui.add_space(6.0);
-        let modern_note = match Picture::MODERN.resolved(self.screen).resolution {
+        let screen = self.host.screen;
+        let modern_note = match Picture::resolved(
+            Picture {
+                resolution: None,
+                quality: Quality::High,
+                vsync: true,
+            },
+            screen,
+        )
+        .resolution
+        {
             Some((width, height)) => format!("{width}×{height}, High."),
             None => "High graphics at your screen's size.".to_string(),
         };
         let cards = [
             (Look::Modern, "Modern", modern_note),
-            (
-                Look::SteamDeck,
-                "Steam Deck",
-                "1280×800, High, 16:10.".to_string(),
-            ),
+            (Look::SteamDeck, "Steam Deck", "1280×800, High.".to_string()),
             (
                 Look::Original,
                 "Original 2007",
@@ -378,11 +354,12 @@ impl Window<'_> {
                     title,
                     note: &note,
                     selected: self.form.look == look,
-                    badge: (look == form::recommended(self.screen)).then_some("Recommended"),
+                    badge: (look == form::recommended(screen)).then_some("Recommended"),
                     ..LookCard::default()
                 };
                 if widgets::look_card(ui, vec2(width, 116.0), &card).clicked() {
                     self.form.set_look(look);
+                    self.refresh_resolutions();
                     if look == Look::Custom {
                         self.tab = Tab::Picture;
                     }
@@ -392,103 +369,155 @@ impl Window<'_> {
         ui.add_space(14.0);
 
         widgets::heading(ui, "Timing");
-        let stutter_fix_disabled = form::stutter_fix_disabled(self.folder_has_pacer());
-        ui.horizontal_top(|ui| {
-            widgets::field(ui, "Stutter fix");
+        let stutter_disabled = form::stutter_fix_disabled(self.folder_has_pacer());
+        option_row(ui, "stutter_fix", |ui| {
             widgets::chips(
                 ui,
                 &[(true, "On (recommended)"), (false, "Off")],
                 &mut self.form.stutter_fix,
-                stutter_fix_disabled,
-            );
+                stutter_disabled,
+            )
         });
-        let folder_lacks_pacer = matches!(self.check, Check::Found { pacer: false, .. });
-        if !folder_lacks_pacer {
-            widgets::note(
-                ui,
-                "The community pacer fix is applied to the private copy: it removes the \
-                 whole-game microstutter and the stage-2+ championship judder (two stacked \
-                 timing bugs in the 2007 build).",
-            );
-        } else {
+        if matches!(self.check, Check::Found { pacer: false, .. }) {
             widgets::error_note(
                 ui,
-                "The stutter fix needs the clean SEGA Rally_SSE1.exe, which this folder \
-                 does not have, so the game runs unpatched.",
+                "This folder has no clean SEGA Rally_SSE1.exe, so the game runs without \
+                 the stutter fix.",
             );
         }
-        ui.horizontal_top(|ui| {
-            widgets::field(ui, "Frame limit");
+        let frame_disabled = form::frame_limit_disabled(self.host.dxvk);
+        option_row(ui, "frame_limit", |ui| {
             widgets::chips(
                 ui,
                 &FrameLimit::ALL.map(|limit| (limit, limit.label())),
                 &mut self.form.frame_limit,
-                form::frame_limit_disabled(self.dxvk),
-            );
+                frame_disabled,
+            )
         });
-        widgets::note(
-            ui,
-            if self.dxvk {
-                "The limit runs through DXVK's frame limiter, the community-standard pacing \
-                 guard. With vsync on, the display's refresh caps the game too."
-            } else {
-                "The frame limit needs DXVK (Linux, Wine or Proton). On Windows the game \
-                 follows vsync instead."
-            },
-        );
         ui.add_space(8.0);
 
         widgets::heading(ui, "Language");
-        ui.horizontal_top(|ui| {
-            widgets::field(ui, "Menus");
+        option_row(ui, "language", |ui| {
             let options: Vec<(String, &str)> = LANGUAGES
                 .iter()
                 .map(|language| ((*language).to_string(), *language))
                 .collect();
-            widgets::chips(ui, &options, &mut self.form.language, None);
+            widgets::chips(ui, &options, &mut self.form.language, None)
         });
+        ui.add_space(8.0);
+
+        self.directx_section(ui);
     }
 
-    fn picture_tab(&mut self, ui: &mut egui::Ui) {
-        let before = self.form.picture;
-        let picture = &mut self.form.picture;
-        let resolutions = &self.resolutions[..];
-        let row = |ui: &mut egui::Ui, name: &str, add: &mut dyn FnMut(&mut egui::Ui)| {
-            ui.horizontal_top(|ui| {
-                widgets::field(ui, name);
-                ui.vertical(|ui| add(ui));
-            });
-        };
-        row(ui, "Resolution", &mut |ui| {
-            widgets::chips(ui, resolutions, &mut picture.resolution, None);
-        });
-        row(ui, "Aspect", &mut |ui| {
-            widgets::chips(ui, &form::ASPECTS, &mut picture.aspect, None);
-        });
+    fn directx_section(&mut self, ui: &mut egui::Ui) {
+        widgets::heading(ui, directx::LABEL);
         widgets::note(
             ui,
-            "21:9 and 32:9 patch the aspect tables of the private copy. 16:9 and 16:10 \
-             need no patch: the game picks between them from the resolution.",
+            "Windows 10 and 11 lack the DirectX 9 files the game was built with. One download \
+             from Microsoft (100 MB) puts them in the private copy. Under Linux the game \
+             usually runs without them.",
         );
-        row(ui, "Quality", &mut |ui| {
-            widgets::chips(
-                ui,
-                &Quality::ALL.map(|quality| (quality, quality.label())),
-                &mut picture.quality,
-                None,
-            );
-        });
-        row(ui, "", &mut |ui| {
-            widgets::toggle(ui, &mut picture.vsync, "Vsync (60 Hz)", None);
-        });
-        if self.form.picture != before {
-            self.form.look = Form::look_of(&self.form.picture, self.screen);
+        let pin = directx::pin();
+        let root = self.host.directx_root.clone();
+        let installed = directx::installed(&pin, &root).is_some();
+        let phase = self.download.as_ref().map(|progress| progress.job.phase());
+        let after = self.download.as_ref().map(|progress| progress.after());
+        let state = match (&after, &phase) {
+            (Some(After::Unpacking), _) => DownloadState::Unpacking { done: 0, total: 1 },
+            (Some(After::Failed(message)), _) => DownloadState::Failed(message),
+            (Some(After::Done(_)), _) => DownloadState::Installed,
+            // The download finished; unpacking starts in a moment.
+            (_, Some(rea_launcher::download::Phase::Done(_))) => {
+                DownloadState::Unpacking { done: 0, total: 1 }
+            }
+            _ => DownloadState::from_phase(
+                phase.as_ref(),
+                installed,
+                rea_launcher::download::partial(&pin, &root),
+            ),
+        };
+        let row = Download {
+            label: directx::LABEL,
+            size: pin.size,
+            state,
+        };
+        match download_row(ui, &row) {
+            Some(DownloadAction::Start) => {
+                let progress = Arc::new(Progress::default());
+                self.download = Some(progress.clone());
+                (self.host.start_download)(progress);
+            }
+            Some(DownloadAction::Cancel) => {
+                if let Some(progress) = &self.download {
+                    progress.job.cancel();
+                }
+            }
+            Some(DownloadAction::Remove) => {
+                if let Err(error) = directx::remove(&pin, &root) {
+                    self.error = Some(format!("Can't remove the DirectX 9 files: {error}"));
+                }
+                self.download = None;
+            }
+            None => {}
         }
+        if state.running() {
+            ui.ctx().request_repaint_after(Duration::from_millis(100));
+        }
+    }
+
+    fn refresh_resolutions(&mut self) {
+        self.resolutions = form::resolutions(self.host.screen, self.form.picture.resolution);
+    }
+
+    /// Picture: the screen size (with what the game will run at, and
+    /// whether the ultra-wide fix applies), then detail and vsync.
+    fn picture_tab(&mut self, ui: &mut egui::Ui) {
+        let screen = self.host.screen;
+        let mut picture = self.form.picture;
+        widgets::heading(ui, "Screen");
+        option_row(ui, "resolution", |ui| {
+            widgets::chips(ui, &self.resolutions, &mut picture.resolution, None)
+        });
+        let size = picture.resolved(screen).resolution.expect("resolved");
+        let outcome = match Aspect::for_resolution(size) {
+            Aspect::Native => format!("Runs at {}×{}, in the game's own aspect.", size.0, size.1),
+            ultra => format!(
+                "Runs at {}×{}: {}, so the private copy gets the ultra-wide fix.",
+                size.0,
+                size.1,
+                ultra.key()
+            ),
+        };
+        ui.horizontal(|ui| {
+            ui.add_space(rea_launcher_ui::theme::metrics(ui.ctx()).field_width);
+            ui.label(egui::RichText::new(outcome).font(body(14.0)).color(ORANGE));
+        });
+        ui.add_space(12.0);
+
+        widgets::heading(ui, "Detail");
+        option_row(ui, "quality", |ui| {
+            let chips: Vec<Chip<'_, Quality>> = Quality::ALL
+                .iter()
+                .map(|quality| {
+                    let label = match quality {
+                        Quality::Normal => "Normal",
+                        Quality::High => "High",
+                        Quality::Ultra => "Ultra",
+                    };
+                    Chip::new(*quality, label)
+                })
+                .collect();
+            widgets::chips_with(ui, &chips, &mut picture.quality)
+        });
+        option_row(ui, "vsync", |ui| {
+            widgets::toggle(ui, &mut picture.vsync, "Vsync", None)
+        });
+        self.form.edit_picture(picture, screen);
     }
 
     fn controls_tab(&mut self, ui: &mut egui::Ui) {
         widgets::heading(ui, "Xbox-style pads");
-        let pads = match self.pads {
+        let pads = match self.host.pads {
             0 => "No Xbox-style pad is connected now. Connect one before starting the game."
                 .to_string(),
             1 => "One Xbox-style pad connected.".to_string(),
@@ -497,9 +526,8 @@ impl Window<'_> {
         ui.label(egui::RichText::new(pads).font(body(15.0)).color(INK));
         widgets::note(
             ui,
-            "On Linux, srr-play preconfigures Wine's SDL controller bridge for this game \
-             (Map Controllers=1). Use the pad's X-input mode and bind it in the game's \
-             Controls menu.",
+            "Switch the pad to X-input mode and set it up in the game's own Controls menu. \
+             On Linux the launcher prepares Wine's controller support for this game.",
         );
         ui.add_space(8.0);
         ui.label(
@@ -511,26 +539,144 @@ impl Window<'_> {
             .color(ORANGE),
         );
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            if widgets::outline_button(ui, "Test rumble").clicked() {
-                let took = xinput::test_rumble(60, Duration::from_millis(500));
-                self.rumble_test = Some(if took == 0 {
-                    "No pad accepted rumble. Check the pad connection and X-input mode.".to_string()
-                } else {
-                    "Sent for half a second: the pad accepts rumble. This only tests the \
-                     pad; keep in-game force feedback off."
-                        .to_string()
-                });
-            }
-        });
+        if widgets::outline_button(ui, "Test rumble").clicked() {
+            let took = (self.host.test_rumble)();
+            self.rumble_test = Some(if took == 0 {
+                "No pad accepted rumble. Check the pad connection and X-input mode.".to_string()
+            } else {
+                "Sent for half a second: the pad accepts rumble. This only tests the pad; \
+                 keep in-game force feedback off."
+                    .to_string()
+            });
+        }
         if let Some(result) = &self.rumble_test {
             ui.label(egui::RichText::new(result).font(body(13.0)).color(ORANGE));
         }
         ui.add_space(10.0);
         widgets::note(
             ui,
-            "The launcher window itself supports d-pad navigation, A to change a setting, \
-             LB/RB for tabs, and Start to play.",
+            "This window works with the pad too: d-pad to move, A to change a setting, \
+             LB/RB for tabs, Start to play.",
         );
     }
 }
+
+/// One option's row: its label from the option table, the control, and
+/// the option's one-line description under it; the control gets both as
+/// its accessible name and description, and the key is recorded for the
+/// parity test.
+fn option_row(ui: &mut egui::Ui, key: &str, control: impl FnOnce(&mut egui::Ui) -> Response) {
+    let spec = config::option(key);
+    mark_rendered(ui.ctx(), spec.key);
+    let response = ui
+        .horizontal_top(|ui| {
+            if spec.kind == rea_launcher::cfg::spec::Kind::Toggle {
+                ui.add_space(rea_launcher_ui::theme::metrics(ui.ctx()).field_width);
+            } else {
+                widgets::field(ui, spec.label);
+            }
+            ui.vertical(|ui| {
+                let response = control(ui);
+                widgets::note(ui, spec.description);
+                response
+            })
+            .inner
+        })
+        .inner;
+    let (label, description) = (spec.label, spec.description);
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(label.to_owned());
+        node.set_description(description.to_owned());
+    });
+    ui.add_space(6.0);
+}
+
+#[cfg(windows)]
+pub use native::show;
+
+#[cfg(windows)]
+mod native {
+    use super::*;
+    use crate::palette::{METRICS, PALETTE};
+    use rea_launcher_ui::eframe;
+    use rea_launcher_ui::theme;
+    use rea_launcher_ui::window::{SIZE, WindowFit};
+    use rea_launcher_win32::{dialog, disk, display, http, wine, xinput};
+
+    struct App {
+        window: Window,
+    }
+
+    impl eframe::App for App {
+        fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+            self.window.pad_input(ctx, raw);
+        }
+
+        fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+            self.window.draw(ui);
+            ui.ctx().request_repaint_after(Duration::from_millis(50));
+        }
+    }
+
+    pub fn show(
+        settings_path: &Path,
+        directx_root: &Path,
+        saved: Option<&str>,
+        linux: bool,
+    ) -> Result<Outcome, String> {
+        let wine = wine::is_wine();
+        // Under Wine the window is created at its final size (XWayland can
+        // lose a later resize). Wine then scales the window by its own DPI
+        // setting, so that is divided out; the DPI scale is read first, as it
+        // also makes the process DPI aware before the screen size is taken.
+        // On Windows the window keeps its 1x creation size (no native fit).
+        let native = display::wine_dpi_scale();
+        let screen = display::screen_size();
+        let fit = WindowFit::new(SIZE, wine, screen, native);
+        let zoom = fit.zoom();
+        let options = fit.native_options("Sega Rally Revo");
+        let host = Host {
+            screen,
+            linux,
+            dxvk: linux || wine,
+            pads: xinput::connected(),
+            pick_folder: Box::new(|| dialog::pick_folder("Choose the folder with SEGA Rally.exe")),
+            test_rumble: Box::new(|| xinput::test_rumble(60, Duration::from_millis(500))),
+            buttons: Box::new(xinput::buttons),
+            directx_root: directx_root.to_path_buf(),
+            start_download: {
+                let root = directx_root.to_path_buf();
+                Box::new(move |progress| {
+                    let root = root.clone();
+                    std::thread::spawn(move || {
+                        let fetch =
+                            http::WinHttp::new(concat!("SRRLauncher/", env!("CARGO_PKG_VERSION")));
+                        let _ = directx::install(
+                            &directx::pin(),
+                            &root,
+                            &disk::free_space,
+                            &fetch,
+                            &progress,
+                        );
+                    });
+                })
+            },
+        };
+        let window = Window::new(settings_path.to_path_buf(), saved.map(str::to_string), host);
+        let outcome = window.outcome.clone();
+        eframe::run_native(
+            "Sega Rally Revo",
+            options,
+            Box::new(move |cc| {
+                theme::install_with(&cc.egui_ctx, &PALETTE, &METRICS);
+                cc.egui_ctx.set_zoom_factor(zoom);
+                Ok(Box::new(App { window }))
+            }),
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(*outcome.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+}
+
+#[cfg(test)]
+mod tests;

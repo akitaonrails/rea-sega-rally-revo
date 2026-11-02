@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+- **One option table for the window, `launcher.cfg` and the command
+  line.** `--help`, the first-run `launcher.cfg` and the window's labels
+  and descriptions come from it, and a test fails if the window and the
+  command line drift apart. Every option now has a plain one-line
+  description in the window and the template.
+  - Keys are spelled with underscores: `frame_limit`, `stutter_fix`. Files
+    with the old `frame-limit` / `stutter-fix` keep working (and the flags
+    are the same); saving from the window writes the new names and turns
+    the old lines into comments.
+  - The window writes `on`/`off` (it wrote `true`/`false`, which are still
+    read).
+  - New `--look modern|steam-deck|original|custom`: sets the look's
+    resolution, quality and vsync for one run (other flags still win).
+  - `--resolution auto` (and `resolution = auto`) uses the screen's size.
+  - Error messages name the flag, the value and what it takes.
+- **The aspect choice is gone; the aspect follows the resolution.** The
+  16:9 and 16:10 chips changed nothing (the game picks between them from
+  the resolution), and 21:9/32:9 only made sense with an ultra-wide
+  resolution. Now an ultra-wide resolution gets the aspect fix by
+  itself, and the Picture tab says what the game will run at. An old
+  `aspect = …` line is ignored silently; `--aspect` is refused with an
+  explanation. If you had forced 16:9 on an ultra-wide resolution, the
+  picture is now unstretched instead.
+- **The Picture tab** is regrouped (Screen: resolution and what it means;
+  Detail: quality and vsync), with a description under each control.
+- **Patches only go into identified executables.** The stutter fix and
+  the ultra-wide aspect fix are site tables for the exact builds (SDK
+  `PatchSet`), applied from the game folder's untouched executable every
+  launch. Before, the aspect tables were found by a byte pattern in any
+  executable, including unknown ones. An unknown executable is never
+  patched; the error (and the window) show its SHA-256 and the issue link
+  to report it, with launcher.log attached.
+- **`config.ini` keeps your in-game choices.** A missing file is still
+  seeded complete. After that only the keys of options set in
+  `launcher.cfg` are written (resolution, quality, vsync) and recorded;
+  when one goes back to unset, its key is restored only if it still
+  holds the launcher's value. Earlier releases rewrote all 25 `[Graphics]`
+  keys every launch. The menu language is written to the registry only
+  when `language` is set (English stays a default for a missing value).
+- **`--check`, `--help` and errors print to the terminal** the launcher
+  was started from (a message box only when there is none). `--check`
+  exits with 1 when the folder cannot be played. `launcher.log` records
+  each executable's SHA-256, the patch sets applied with the result's
+  hash, and DXVK's hash.
+- **Microsoft DirectX 9 files: one button.** The Play tab has a Download
+  button (and `--download-directx`) that fetches Microsoft's DirectX
+  End-User Runtime (June 2010) from download.microsoft.com, pinned by
+  SHA-256, only when you press it; the D3DX9 and D3DCompiler DLLs go next
+  to the game in the private copy (never over a file of yours) and Wine
+  is told to use them. Windows 10/11 lack these files; under Wine the
+  built-in ones were enough in our runs. Remove takes them out again.
+- The photo's credit lines sit on a solid band (no small text over the
+  picture).
 - **Updated rea-launcher-sdk to v0.2.0.** The settings window's control
   borders are lighter (`#5475a1` instead of `#1f4a84`) so they reach the
   3:1 contrast that WCAG asks of controls; text selection in fields keeps

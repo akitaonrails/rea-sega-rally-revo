@@ -1,589 +1,344 @@
-//! Binary patches applied to the private runtime copy of the game.
+//! Binary patches for the private runtime copy of the game, as SDK
+//! `PatchSet` tables (`rea_launcher::patch`): every site is original →
+//! patched bytes at an exact file offset of an exact build (SHA-256), and
+//! the launcher applies them from the pristine bytes in the player's game
+//! folder, all or nothing, never to an unidentified executable.
 //!
-//! Two patches exist, both gated by exact byte verification:
+//! - [`PACER`]: the community stutter fix for the clean
+//!   `SEGA Rally_SSE1.exe` (reimplemented from
+//!   stuken/SegaRallyRevoStutterFix, whose reference build is
+//!   byte-identical to this one). Three hooks jump to three code caves:
+//!   at most one pacer thread (the Championship stage-2 judder), a race
+//!   clock sampled from the master clock (the 16/17 ms jitter), and a
+//!   per-frame race-clock refresh. The result is checked against the
+//!   fix's reference SHA-256.
+//! - The aspect sets: the renderer's 16:9 constant (`39 8E E3 3F`) in its
+//!   two aspect tables becomes 21:9 or 32:9 for ultra-wide resolutions,
+//!   the PCGamingWiki/WSGF hex edit at this build's own offsets.
 //!
-//! - `pacer` — the community stutter fix for the clean `SEGA Rally_SSE1.exe`
-//!   (studied from stuken/SegaRallyRevoStutterFix, whose reference build is
-//!   byte-identical to the rip this launcher targets). It fixes two stacked
-//!   timing bugs: the whole-game 16/17 ms truncation jitter and the
-//!   campaign-only stage-2+ stutter caused by a duplicated pacer thread.
-//! - `aspect` — replaces the renderer's 16:9 aspect constant with the
-//!   chosen ratio so ultra-wide resolutions render without stretching
-//!   (the approach documented on PCGamingWiki, applied pattern-based so it
-//!   also fits builds whose file offsets differ).
-//!
-//! The user's source folder is never written; patches are only ever applied
-//! to the runtime copy, and every write is checked against the expected
-//! original bytes first. The checks themselves (expected-or-patched sites,
-//! zero-filled caves, the result's SHA-256) are the SDK's `patch` module.
+//! `docs/RESEARCH.md` explains the sites; `describe()` prints them.
 
-use rea_launcher::patch::{self, Site};
+use rea_launcher::identify::hex32;
+use rea_launcher::patch::{self, At, PatchCave, PatchError, PatchSet, PatchSite};
 
-/// A tiny x86 assembler for literal opcodes plus computed rel32 branches.
-struct Asm {
-    base: u32,
-    bytes: Vec<u8>,
-}
+use crate::config::Aspect;
 
-impl Asm {
-    fn new(base: u32) -> Asm {
-        Asm {
-            base,
-            bytes: Vec::new(),
+/// The clean `SEGA Rally_SSE1.exe` v4.0.6.0 (3,727,360 bytes).
+pub const SSE1_CLEAN: [u8; 32] =
+    hex32("22655a54bad6932239ade58325703bd4b5a2020376737748026443fa5aadf76e");
+/// The same build with the stutter fix applied (the fix's reference hash).
+pub const SSE1_PACER: [u8; 32] =
+    hex32("4c08c1deae28a329b6588138198556ac8eaded8444d0eb94a1fe2f1ad08f2520");
+/// The NoDVD `SEGA Rally.exe` v4.0.6.0 of the widely mirrored full rip.
+pub const MAIN_NODVD: [u8; 32] =
+    hex32("ad84ecea6ac5e86e1f1a420f07595866429bba63e7c489b40661a8032ba391d7");
+
+/// `N` bytes from hex, at compile time.
+const fn hex<const N: usize>(text: &str) -> [u8; N] {
+    let text = text.as_bytes();
+    assert!(text.len() == 2 * N);
+    const fn digit(c: u8) -> u8 {
+        match c {
+            b'0'..=b'9' => c - b'0',
+            b'a'..=b'f' => c - b'a' + 10,
+            _ => panic!("lower-case hex"),
         }
     }
-
-    fn va(&self) -> u32 {
-        self.base + self.bytes.len() as u32
+    let mut out = [0; N];
+    let mut i = 0;
+    while i < N {
+        out[i] = digit(text[2 * i]) << 4 | digit(text[2 * i + 1]);
+        i += 1;
     }
-
-    fn raw(&mut self, bytes: &[u8]) -> &mut Asm {
-        self.bytes.extend_from_slice(bytes);
-        self
-    }
-
-    /// `E8` (call) / `E9` (jmp) to an absolute VA.
-    fn rel32(&mut self, opcode: u8, target: u32) -> &mut Asm {
-        self.raw(&[opcode]);
-        let end = self.va() + 4;
-        self.bytes.extend_from_slice(
-            &i32::checked_sub(target as i32, end as i32)
-                .expect("branch distance fits i32")
-                .to_le_bytes(),
-        );
-        self
-    }
-
-    /// Short conditional branch over an already-assembled block.
-    fn branch_over(&mut self, opcode: u8, block: &[u8]) -> &mut Asm {
-        assert!(block.len() < 128);
-        self.raw(&[opcode, block.len() as u8]);
-        self.bytes.extend_from_slice(block);
-        self
-    }
+    out
 }
 
-fn le32(value: u32) -> [u8; 4] {
-    value.to_le_bytes()
+// Engine sites in the clean SSE1 build; in `.text` the file offset is the
+// virtual address minus the image base 0x400000.
+const SPAWN_HOOK: usize = 0x195_660; // pacer thread spawn
+const TICK_HOOK: usize = 0x195_323; // race-clock tick (+16 ms)
+const MAIN_HOOK: usize = 0x158_895; // main loop, power-poll deadline
+const CAVE1: usize = 0x285_100; // spawn guard
+const CAVE2: usize = 0x285_180; // race-clock tick from the master clock
+const CAVE3: usize = 0x285_200; // main-loop race-clock refresh
+
+const SPAWN_GUARD: [u8; 39] =
+    hex("833da020b40000750a518d042450e95205f1ffc605a420b40001c605a520b40000b801000000c3");
+const RACE_CLOCK: [u8; 57] = hex(
+    "51e80a47f0ff8b152c099500a1280995006a0068e80300005250e851a7e2ff3b05d8709600760ba3d87096008915dc70960059f8e97101f1ff",
+);
+const MAIN_REFRESH: [u8; 34] =
+    hex("3b05d8709600760ba3d87096008915dc7096008bf23b35748c72008bf8e97d36edff");
+
+/// The community stutter fix (see the module docs).
+pub const PACER: PatchSet = PatchSet {
+    name: "pacer",
+    summary: "Removes the microstutter in every race and the judder from Championship stage 2",
+    editions: &[SSE1_CLEAN],
+    sites: &[
+        PatchSite {
+            at: At::Offset(SPAWN_HOOK),
+            original: &[0x51, 0x8D, 0x04, 0x24, 0x50],
+            patched: &[0xE9, 0x9B, 0xFA, 0x0E, 0x00],
+            note: "pacer spawn: jmp to the spawn guard",
+        },
+        PatchSite {
+            at: At::Offset(TICK_HOOK),
+            original: &[0x83, 0x05, 0xD8, 0x70, 0x96, 0x00, 0x10],
+            patched: &[0xE9, 0x58, 0xFE, 0x0E, 0x00, 0x90, 0x90],
+            note: "race-clock tick: jmp to the master-clock tick",
+        },
+        PatchSite {
+            at: At::Offset(MAIN_HOOK),
+            original: &[0x8B, 0xF2, 0x3B, 0x35, 0x74],
+            patched: &[0xE9, 0x66, 0xC9, 0x12, 0x00],
+            note: "main loop: jmp to the race-clock refresh",
+        },
+        PatchSite {
+            at: At::Offset(CAVE1),
+            original: &[0; 39],
+            patched: &SPAWN_GUARD,
+            note: "spawn guard: at most one pacer thread",
+        },
+        PatchSite {
+            at: At::Offset(CAVE2),
+            original: &[0; 57],
+            patched: &RACE_CLOCK,
+            note: "race clock = master clock / 1000, never backwards",
+        },
+        PatchSite {
+            at: At::Offset(CAVE3),
+            original: &[0; 34],
+            patched: &MAIN_REFRESH,
+            note: "race clock refreshed every frame",
+        },
+    ],
+    caves: &[
+        PatchCave {
+            name: "spawn guard",
+            at: At::Offset(CAVE1),
+            len: 39,
+        },
+        PatchCave {
+            name: "race clock",
+            at: At::Offset(CAVE2),
+            len: 57,
+        },
+        PatchCave {
+            name: "main-loop refresh",
+            at: At::Offset(CAVE3),
+            len: 34,
+        },
+    ],
+    results: &[(SSE1_CLEAN, SSE1_PACER)],
+};
+
+const RATIO_16_9: [u8; 4] = hex("398ee33f");
+const RATIO_21_9: [u8; 4] = hex("26b41740"); // 64/27, 2560x1080
+const RATIO_32_9: [u8; 4] = hex("398e6340");
+
+/// The two 16:9 slots of the aspect tables (`.rdata`), each flanked by
+/// 4:3 `AB AA AA 3F` and 16:10 `CD CC CC 3F`.
+const SSE1_SLOTS: [usize; 2] = [0x2F_7C44, 0x2F_ADA8];
+const MAIN_SLOTS: [usize; 2] = [0x2F_4BF4, 0x2F_7D68];
+
+macro_rules! aspect_set {
+    ($name:literal, $summary:literal, $editions:expr, $slots:expr, $ratio:expr) => {
+        PatchSet {
+            name: $name,
+            summary: $summary,
+            editions: $editions,
+            sites: &[
+                PatchSite {
+                    at: At::Offset($slots[0]),
+                    original: &RATIO_16_9,
+                    patched: &$ratio,
+                    note: "aspect table 1: 16:9 slot",
+                },
+                PatchSite {
+                    at: At::Offset($slots[1]),
+                    original: &RATIO_16_9,
+                    patched: &$ratio,
+                    note: "aspect table 2: 16:9 slot",
+                },
+            ],
+            caves: &[],
+            results: &[],
+        }
+    };
 }
 
-// Engine addresses in the clean SSE1 build (image base 0x400000; for
-// .text the file offset equals VA - 0x400000).
-const IMAGE_BASE: u32 = 0x400_000;
-const CLOCK_TICK: u32 = 0x589_890; // Clock_Tick_QpcToUsecTotal
-const AULLDIV: u32 = 0x4AF_8F0; //   __aulldiv (ret 0x10)
-const TOTAL_USEC_L: u32 = 0x950_928; // master clock, microseconds (64-bit)
-const TOTAL_USEC_H: u32 = 0x950_92C;
-const RACE_MS_L: u32 = 0x967_0D8; // race clock, milliseconds (64-bit)
-const RACE_MS_H: u32 = 0x967_0DC;
-const PACER_HANDLE: u32 = 0xB42_0A0; // pacer object +0x1C: thread handle
-const PACER_FLAG: u32 = 0xB42_0A4; //                       +0x20: run flag
-const PACER_GATE: u32 = 0xB42_0A5; //                       +0x21: list gate
-const POWER_NEXT_H: u32 = 0x728_C74; // main loop power-poll deadline (hi)
+pub const ASPECT_21_SSE1: PatchSet = aspect_set!(
+    "aspect 21:9",
+    "21:9 screens without stretching",
+    &[SSE1_CLEAN, SSE1_PACER],
+    SSE1_SLOTS,
+    RATIO_21_9
+);
+pub const ASPECT_32_SSE1: PatchSet = aspect_set!(
+    "aspect 32:9",
+    "32:9 screens without stretching",
+    &[SSE1_CLEAN, SSE1_PACER],
+    SSE1_SLOTS,
+    RATIO_32_9
+);
+pub const ASPECT_21_MAIN: PatchSet = aspect_set!(
+    "aspect 21:9",
+    "21:9 screens without stretching",
+    &[MAIN_NODVD],
+    MAIN_SLOTS,
+    RATIO_21_9
+);
+pub const ASPECT_32_MAIN: PatchSet = aspect_set!(
+    "aspect 32:9",
+    "32:9 screens without stretching",
+    &[MAIN_NODVD],
+    MAIN_SLOTS,
+    RATIO_32_9
+);
 
-const SPAWN_HOOK: u32 = 0x595_660;
-const SPAWN_RESUME: u32 = 0x595_665;
-const TICK_HOOK: u32 = 0x595_323;
-const TICK_RESUME: u32 = 0x595_32A;
-const MAIN_HOOK: u32 = 0x558_895;
-const MAIN_RESUME: u32 = 0x558_89F;
-
-const CAVE1: u32 = 0x685_100; // spawn guard
-const CAVE2: u32 = 0x685_180; // race-clock tick
-const CAVE3: u32 = 0x685_200; // main-loop refresh
-
-/// .rdata raw data starts here; caves must stay below it.
-const TEXT_RAW_END: usize = 0x286_000;
-/// Exact size of the clean build; a different size is another build.
-const SSE1_SIZE: usize = 3_727_360;
-
-const SPAWN_ORIGINAL: &[u8; 5] = &[0x51, 0x8D, 0x04, 0x24, 0x50];
-const TICK_ORIGINAL: &[u8; 7] = &[0x83, 0x05, 0xD8, 0x70, 0x96, 0x00, 0x10];
-const MAIN_ORIGINAL: &[u8; 5] = &[0x8B, 0xF2, 0x3B, 0x35, 0x74];
-
-/// Sites written unconditionally to normalise earlier community
-/// experiments (the 0.96 clock scale, a resync test, a thread-priority
-/// test). All are no-ops on the clean base. These writes are deliberately
-/// not compared against expected original bytes (they exist to overwrite
-/// whatever an experiment left there); [`pacer_verified`] checks the whole
-/// result against the known patched SHA-256 instead, so an unexpected base
-/// is still refused before anything reaches disk.
-const NORMALISE: [(&[u8], usize, &str); 3] = [
-    (&[0x40, 0x42, 0x0F, 0x00], 0x1898CE, "0.96 clock scale"),
-    (
-        &[0xA3, 0xD8, 0x70, 0x96, 0x00],
-        0x19539E,
-        "pacer resync site",
-    ),
-    (&[0x01], 0x1723EE, "engine thread priority"),
+/// Every set, for docs and the real-game test.
+pub const ALL: [&PatchSet; 5] = [
+    &PACER,
+    &ASPECT_21_SSE1,
+    &ASPECT_32_SSE1,
+    &ASPECT_21_MAIN,
+    &ASPECT_32_MAIN,
 ];
 
-/// Why a patch was refused. Nothing was written.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PatchError {
-    /// Not the size of the clean SSE1 build.
-    NotPatchable,
-    /// A site, cave or result check failed (the SDK's checks).
-    Check(patch::PatchError),
-}
-
-impl From<patch::PatchError> for PatchError {
-    fn from(error: patch::PatchError) -> PatchError {
-        PatchError::Check(error)
+/// The aspect set for a build and an aspect, `None` for native aspects or
+/// a build without a table.
+pub fn aspect_set(build: [u8; 32], aspect: Aspect) -> Option<&'static PatchSet> {
+    let main = build == MAIN_NODVD;
+    let sse1 = build == SSE1_CLEAN || build == SSE1_PACER;
+    match (aspect, main, sse1) {
+        (Aspect::Ultra21, true, _) => Some(&ASPECT_21_MAIN),
+        (Aspect::Ultra32, true, _) => Some(&ASPECT_32_MAIN),
+        (Aspect::Ultra21, _, true) => Some(&ASPECT_21_SSE1),
+        (Aspect::Ultra32, _, true) => Some(&ASPECT_32_SSE1),
+        _ => None,
     }
 }
 
-impl std::fmt::Display for PatchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PatchError::NotPatchable => {
-                write!(f, "this executable is not the supported SSE1 build")
-            }
-            PatchError::Check(error) => error.fmt(f),
-        }
+/// The names of `sets`, for the log (`pacer + aspect 21:9`, or `none`).
+pub fn names(sets: &[&PatchSet]) -> String {
+    if sets.is_empty() {
+        return "none".to_string();
     }
+    sets.iter()
+        .map(|set| set.name)
+        .collect::<Vec<_>>()
+        .join(" + ")
 }
 
-fn file_offset(va: u32) -> usize {
-    (va - IMAGE_BASE) as usize
-}
-
-fn spawn_guard_cave() -> Vec<u8> {
-    let mut cave = Asm::new(CAVE1);
-    cave.raw(&[0x83, 0x3D])
-        .raw(&le32(PACER_HANDLE))
-        .raw(&[0x00]);
-    let mut prologue = Asm::new(cave.va() + 2);
-    prologue.raw(&[0x51, 0x8D, 0x04, 0x24, 0x50]);
-    prologue.rel32(0xE9, SPAWN_RESUME);
-    let prologue = std::mem::take(&mut prologue.bytes);
-    cave.branch_over(0x75, &prologue);
-    cave.raw(&[0xC6, 0x05]).raw(&le32(PACER_FLAG)).raw(&[0x01]);
-    cave.raw(&[0xC6, 0x05]).raw(&le32(PACER_GATE)).raw(&[0x00]);
-    cave.raw(&[0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3]);
-    cave.bytes
-}
-
-fn race_clock_cave() -> Vec<u8> {
-    let store = [
-        &[0xA3][..],
-        &le32(RACE_MS_L)[..],
-        &[0x89, 0x15],
-        &le32(RACE_MS_H)[..],
-    ]
-    .concat();
-    let mut cave = Asm::new(CAVE2);
-    cave.raw(&[0x51]);
-    cave.rel32(0xE8, CLOCK_TICK);
-    cave.raw(&[0x8B, 0x15]).raw(&le32(TOTAL_USEC_H));
-    cave.raw(&[0xA1]).raw(&le32(TOTAL_USEC_L));
-    cave.raw(&[0x6A, 0x00]);
-    cave.raw(&[0x68]).raw(&le32(1000));
-    cave.raw(&[0x52]);
-    cave.raw(&[0x50]);
-    cave.rel32(0xE8, AULLDIV);
-    cave.raw(&[0x3B, 0x05]).raw(&le32(RACE_MS_L));
-    cave.branch_over(0x76, &store);
-    cave.raw(&[0x59, 0xF8]);
-    cave.rel32(0xE9, TICK_RESUME);
-    cave.bytes
-}
-
-fn main_loop_cave() -> Vec<u8> {
-    let store = [
-        &[0xA3][..],
-        &le32(RACE_MS_L)[..],
-        &[0x89, 0x15],
-        &le32(RACE_MS_H)[..],
-    ]
-    .concat();
-    let mut cave = Asm::new(CAVE3);
-    cave.raw(&[0x3B, 0x05]).raw(&le32(RACE_MS_L));
-    cave.branch_over(0x76, &store);
-    cave.raw(&[0x8B, 0xF2]);
-    cave.raw(&[0x3B, 0x35]).raw(&le32(POWER_NEXT_H));
-    cave.raw(&[0x8B, 0xF8]);
-    cave.rel32(0xE9, MAIN_RESUME);
-    cave.bytes
-}
-
-fn hook_bytes(hook: u32, target: u32, pad: usize) -> Vec<u8> {
-    let mut cave = Asm::new(hook);
-    cave.rel32(0xE9, target);
-    let mut bytes = cave.bytes;
-    bytes.resize(bytes.len() + pad, 0x90);
-    bytes
-}
-
-fn caves() -> [(u32, Vec<u8>, &'static str); 3] {
-    [
-        (CAVE1, spawn_guard_cave(), "spawn-guard cave"),
-        (CAVE2, race_clock_cave(), "raceclock cave"),
-        (CAVE3, main_loop_cave(), "mainloop cave"),
-    ]
-}
-
-/// Apply the community pacer fix in place. Returns `Ok(true)` when bytes
-/// were written, `Ok(false)` when the fix is already present. Every check
-/// runs before the first write.
-pub fn pacer(data: &mut [u8]) -> Result<bool, PatchError> {
-    if data.len() != SSE1_SIZE {
-        return Err(PatchError::NotPatchable);
-    }
-    let spawn_hook = hook_bytes(SPAWN_HOOK, CAVE1, 0);
-    let tick_hook = hook_bytes(TICK_HOOK, CAVE2, 2);
-    let main_hook = hook_bytes(MAIN_HOOK, CAVE3, 0);
-    let spawn_at = file_offset(SPAWN_HOOK);
-    if data.get(spawn_at..spawn_at + spawn_hook.len()) == Some(&spawn_hook[..]) {
-        return Ok(false); // already patched
-    }
-
-    let caves = caves();
-    let spans: Vec<patch::Cave> = caves
-        .iter()
-        .map(|(base, bytes, name)| patch::Cave {
-            name,
-            offset: file_offset(*base),
-            len: bytes.len(),
-        })
-        .collect();
-    patch::check_caves(data, &spans, TEXT_RAW_END)?;
-
-    // Normalise first (no-ops on a clean base), then the fix. The caves
-    // were checked zero-filled above; the hooks must hold the clean bytes.
-    let mut sites: Vec<Site> = NORMALISE
-        .iter()
-        .map(|&(patched, offset, name)| Site {
-            name,
-            offset,
-            expected: &[],
-            patched,
-        })
-        .collect();
-    sites.extend([
-        Site {
-            name: "pacer spawn",
-            offset: spawn_at,
-            expected: SPAWN_ORIGINAL,
-            patched: &spawn_hook,
-        },
-        Site {
-            name: "race-clock tick",
-            offset: file_offset(TICK_HOOK),
-            expected: TICK_ORIGINAL,
-            patched: &tick_hook,
-        },
-        Site {
-            name: "main-loop refresh",
-            offset: file_offset(MAIN_HOOK),
-            expected: MAIN_ORIGINAL,
-            patched: &main_hook,
-        },
-    ]);
-    sites.extend(caves.iter().map(|(base, bytes, name)| Site {
-        name,
-        offset: file_offset(*base),
-        expected: &[],
-        patched: bytes,
-    }));
-    patch::apply(data, &sites)?;
-    Ok(true)
-}
-
-/// [`pacer`] on a copy, accepted only when the result is the known
-/// stutter-fixed build (judged with the aspect tables at 16:9, like every
-/// other identification). `data` is left untouched on any error, so the
-/// caller can never write an unverified executable.
-pub fn pacer_verified(data: &mut [u8]) -> Result<bool, PatchError> {
-    let mut patched = data.to_vec();
-    if !pacer(&mut patched)? {
-        return Ok(false);
-    }
-    let mut probe = patched.clone();
-    // aspect() cannot fail; it only reports how many slots changed.
-    let _ = aspect(&mut probe, 16.0 / 9.0);
-    patch::verify_sha256(&probe, &crate::edition::SSE1_PACER_SHA256)?;
-    data.copy_from_slice(&patched);
-    Ok(true)
-}
-
-/// The 16:9 aspect constant `39 8E E3 3F` (1.7777778f32) as it appears in
-/// the game's aspect tables, flanked by the 4:3 (`ab aa aa 3f`) and 16:10
-/// (`cd cc cc 3f`) constants. Patching the middle slot retargets the
-/// renderer's aspect without touching anything else.
-const ASPECT_43: [u8; 4] = 1.333_333_4_f32.to_le_bytes();
-const ASPECT_169: [u8; 4] = (16.0f32 / 9.0).to_le_bytes();
-const ASPECT_1610: [u8; 4] = 1.6_f32.to_le_bytes();
-
-/// The two aspect-table layouts in the clean build, as (slot, tail)
-/// offsets from the 4:3 anchor: the enum-style table has the 16:9 slot
-/// right after 4:3 with 16:10 four bytes later; the id-interleaved table
-/// has an id between each constant and 16:10 sixteen bytes after the
-/// anchor.
-const ASPECT_LAYOUTS: [(usize, usize); 2] = [(4, 8), (8, 16)];
-
-/// Aspect ratios the game's tables already contain, so the original 16:9
-/// constant is kept.
-pub fn is_native_aspect(ratio: f32) -> bool {
-    (ratio - 16.0 / 9.0).abs() < 0.02 || (ratio - 1.6).abs() < 0.02
-}
-
-/// Identify a private copy whatever ultra-wide ratio a previous launch
-/// patched into its aspect tables: the hash is taken with the tables reset
-/// to the original 16:9 constant.
-pub fn identify_ignoring_aspect(exe: &[u8]) -> Result<&'static crate::edition::Edition, [u8; 32]> {
-    let mut probe = exe.to_vec();
-    // aspect() cannot fail; it only reports how many slots changed.
-    let _ = aspect(&mut probe, 16.0 / 9.0);
-    crate::edition::identify(&probe)
-}
-
-/// Every 16:9 slot of an aspect table, whatever value it currently holds.
-fn aspect_slots(data: &[u8]) -> Vec<usize> {
-    let mut slots = Vec::new();
-    for anchor in 0..data.len().saturating_sub(20) {
-        if data[anchor..anchor + 4] != ASPECT_43 {
-            continue;
-        }
-        for (slot, tail) in ASPECT_LAYOUTS {
-            let tail = anchor + tail;
-            if tail + 4 <= data.len() && data[tail..tail + 4] == ASPECT_1610 {
-                let slot = anchor + slot;
-                // The slot must hold a plausible aspect ratio; this keeps a
-                // coincidental 4:3 … 16:10 pair from steering the patch.
-                let value =
-                    f32::from_le_bytes(data[slot..slot + 4].try_into().expect("four bytes"));
-                if (1.0..=4.0).contains(&value) {
-                    slots.push(slot);
-                }
-            }
-        }
-    }
-    slots
-}
-
-/// Set the renderer's aspect tables to `ratio` (native ratios restore the
-/// original 16:9 constant). Returns how many slots were rewritten.
-pub fn aspect(data: &mut [u8], ratio: f32) -> Result<usize, PatchError> {
-    let value = if is_native_aspect(ratio) {
-        ASPECT_169
-    } else {
-        ratio.to_le_bytes()
-    };
-    let mut written = 0;
-    for slot in aspect_slots(data) {
-        if data[slot..slot + 4] != value {
-            data[slot..slot + 4].copy_from_slice(&value);
-            written += 1;
-        }
-    }
-    Ok(written)
+/// `sets` applied to a pristine executable from the game folder; the
+/// SDK refuses another build, a site with other bytes or a wrong result
+/// hash, and nothing is returned then.
+pub fn apply(pristine: &[u8], sets: &[&PatchSet]) -> Result<Vec<u8>, PatchError> {
+    patch::apply_sets(pristine, sets)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rea_launcher::identify;
+    use rea_launcher::patch::testing;
 
-    /// Golden bytes captured from the reference implementation.
-    #[test]
-    fn caves_match_the_reference_assembly() {
-        assert_eq!(
-            spawn_guard_cave(),
-            bytes_from_hex(
-                "833da020b40000750a518d042450e95205f1ffc605a420b40001c605a520b40000b801000000c3"
-            )
-        );
-        assert_eq!(
-            race_clock_cave(),
-            bytes_from_hex(
-                "51e80a47f0ff8b152c099500a1280995006a0068e80300005250e851a7e2ff3b05d8709600760ba3d87096008915dc70960059f8e97101f1ff"
-            )
-        );
-        assert_eq!(
-            main_loop_cave(),
-            bytes_from_hex("3b05d8709600760ba3d87096008915dc7096008bf23b35748c72008bf8e97d36edff")
-        );
-        assert_eq!(
-            hook_bytes(SPAWN_HOOK, CAVE1, 0),
-            bytes_from_hex("e99bfa0e00")
-        );
-        assert_eq!(
-            hook_bytes(TICK_HOOK, CAVE2, 2),
-            bytes_from_hex("e958fe0e009090")
-        );
-        assert_eq!(
-            hook_bytes(MAIN_HOOK, CAVE3, 0),
-            bytes_from_hex("e966c91200")
-        );
+    /// `E9 rel32` from `from` to `to` (file offsets in `.text`).
+    fn jmp(from: usize, to: usize) -> [u8; 5] {
+        let rel = (to as i64 - (from as i64 + 5)) as i32;
+        let mut out = [0xE9, 0, 0, 0, 0];
+        out[1..].copy_from_slice(&rel.to_le_bytes());
+        out
     }
 
-    #[test]
-    fn caves_do_not_overlap_and_stay_in_text() {
-        let mut spans: Vec<(usize, usize)> = caves()
-            .iter()
-            .map(|(base, bytes, _)| (file_offset(*base), file_offset(*base) + bytes.len()))
-            .collect();
-        spans.sort_unstable();
-        for (a, b) in spans.iter().zip(spans.iter().skip(1)) {
-            assert!(a.1 <= b.0, "caves overlap at {a:?} {b:?}");
-            assert!(a.1 <= TEXT_RAW_END);
+    /// A buffer the size of the clean build with every site's original
+    /// bytes in place.
+    fn synthetic(set: &PatchSet) -> Vec<u8> {
+        let mut data = vec![0x90u8; 3_727_360];
+        for site in set.sites {
+            let At::Offset(at) = site.at else {
+                unreachable!()
+            };
+            data[at..at + site.original.len()].copy_from_slice(site.original);
         }
-        assert!(spans[2].1 <= TEXT_RAW_END);
-    }
-
-    fn bytes_from_hex(text: &str) -> Vec<u8> {
-        (0..text.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
-            .collect()
+        data
     }
 
     #[test]
-    fn wrong_size_or_dirty_site_is_refused() {
-        let mut small = vec![0u8; 10];
-        assert_eq!(pacer(&mut small), Err(PatchError::NotPatchable));
+    fn hooks_jump_to_their_caves_and_back() {
+        assert_eq!(PACER.sites[0].patched, jmp(SPAWN_HOOK, CAVE1));
+        assert_eq!(&PACER.sites[1].patched[..5], jmp(TICK_HOOK, CAVE2));
+        assert_eq!(PACER.sites[2].patched, jmp(MAIN_HOOK, CAVE3));
+        // Each cave ends with a jmp back past its hook (the spawn guard
+        // returns or resumes inside its own body).
+        assert_eq!(
+            RACE_CLOCK[RACE_CLOCK.len() - 5..],
+            jmp(CAVE2 + 52, TICK_HOOK + 7)
+        );
+        assert_eq!(
+            MAIN_REFRESH[MAIN_REFRESH.len() - 5..],
+            jmp(CAVE3 + 29, 0x158_89F)
+        );
+    }
 
-        let mut data = vec![0u8; SSE1_SIZE];
-        data[file_offset(SPAWN_HOOK)] = 0x90; // dirty hook site
+    #[test]
+    fn every_set_passes_the_golden_checks() {
+        for set in ALL {
+            testing::assert_golden(set, &synthetic(set));
+        }
+    }
+
+    #[test]
+    fn unknown_builds_are_refused() {
+        // A synthetic file is no known build: nothing is patched.
+        let data = synthetic(&PACER);
         assert!(matches!(
-            pacer(&mut data),
-            Err(PatchError::Check(patch::PatchError::Unexpected { name, .. })) if name == "pacer spawn"
+            apply(&data, &[&PACER]),
+            Err(PatchError::UnknownEdition { .. })
         ));
-
-        let mut data = vec![0xFFu8; SSE1_SIZE];
-        data[file_offset(SPAWN_HOOK)..file_offset(SPAWN_HOOK) + 5].copy_from_slice(SPAWN_ORIGINAL);
-        data[file_offset(TICK_HOOK)..file_offset(TICK_HOOK) + 7].copy_from_slice(TICK_ORIGINAL);
-        data[file_offset(MAIN_HOOK)..file_offset(MAIN_HOOK) + 5].copy_from_slice(MAIN_ORIGINAL);
-        assert_eq!(
-            pacer(&mut data),
-            Err(PatchError::Check(patch::PatchError::CaveNotZero {
-                name: "spawn-guard cave".into(),
-                offset: file_offset(CAVE1),
-            }))
-        );
-        // Nothing is written when a check fails.
-        assert_eq!(
-            &data[file_offset(SPAWN_HOOK)..file_offset(SPAWN_HOOK) + 5],
-            SPAWN_ORIGINAL
-        );
+        assert!(matches!(
+            apply(&synthetic(&ASPECT_21_MAIN), &[&ASPECT_21_MAIN]),
+            Err(PatchError::UnknownEdition { .. })
+        ));
     }
 
     #[test]
-    fn patch_is_idempotent_on_a_clean_synthetic_build() {
-        let mut data = vec![0u8; SSE1_SIZE];
-        for (bytes, offset, _) in [
-            (SPAWN_ORIGINAL as &[u8], file_offset(SPAWN_HOOK), "spawn"),
-            (TICK_ORIGINAL, file_offset(TICK_HOOK), "tick"),
-            (MAIN_ORIGINAL, file_offset(MAIN_HOOK), "main"),
-        ] {
-            data[offset..offset + bytes.len()].copy_from_slice(bytes);
-        }
-        assert_eq!(pacer(&mut data), Ok(true));
-        // Every normalise site was already at its clean value; hooks + caves
-        // are in place, and a second run reports "already patched".
+    fn the_aspect_set_follows_build_and_aspect() {
+        assert_eq!(aspect_set(SSE1_CLEAN, Aspect::Native), None);
         assert_eq!(
-            &data[file_offset(SPAWN_HOOK)..file_offset(SPAWN_HOOK) + 5],
-            &hook_bytes(SPAWN_HOOK, CAVE1, 0)[..]
+            aspect_set(SSE1_CLEAN, Aspect::Ultra21),
+            Some(&ASPECT_21_SSE1)
         );
-        assert_eq!(pacer(&mut data), Ok(false));
+        assert_eq!(
+            aspect_set(SSE1_PACER, Aspect::Ultra32),
+            Some(&ASPECT_32_SSE1)
+        );
+        assert_eq!(
+            aspect_set(MAIN_NODVD, Aspect::Ultra21),
+            Some(&ASPECT_21_MAIN)
+        );
+        assert_eq!(aspect_set([0; 32], Aspect::Ultra21), None);
+        assert_eq!(names(&[&PACER, &ASPECT_21_SSE1]), "pacer + aspect 21:9");
+        assert_eq!(names(&[]), "none");
     }
 
     #[test]
-    fn an_unverified_result_is_refused_and_nothing_changes() {
-        // A synthetic build passes every site check but is not the real
-        // exe, so the patched hash cannot match.
-        let mut data = vec![0u8; SSE1_SIZE];
-        for (bytes, offset) in [
-            (SPAWN_ORIGINAL as &[u8], file_offset(SPAWN_HOOK)),
-            (TICK_ORIGINAL, file_offset(TICK_HOOK)),
-            (MAIN_ORIGINAL, file_offset(MAIN_HOOK)),
-        ] {
-            data[offset..offset + bytes.len()].copy_from_slice(bytes);
-        }
-        let before = data.clone();
-        let mut expected = data.clone();
-        pacer(&mut expected).unwrap();
-        assert_eq!(
-            pacer_verified(&mut data),
-            Err(PatchError::Check(patch::PatchError::Unverified {
-                sha256: identify::sha256(&expected)
-            }))
-        );
-        assert_eq!(data, before, "the input must stay untouched");
-        // Site errors still come through unchanged.
-        assert_eq!(
-            pacer_verified(&mut vec![0u8; 10]),
-            Err(PatchError::NotPatchable)
+    fn the_site_table_describes_itself() {
+        let rows = patch::describe(&ASPECT_21_SSE1, None).unwrap();
+        let table = patch::to_markdown(&rows);
+        assert!(
+            table.contains("2F7C44") || table.contains("2f7c44"),
+            "{table}"
         );
     }
 
-    #[test]
-    fn aspect_slots_follow_the_table_layouts() {
-        let mut data = vec![0u8; 128];
-        // table A: enum-style (4:3, 16:9, 16:10 back to back)
-        data[16..20].copy_from_slice(&ASPECT_43);
-        data[20..24].copy_from_slice(&ASPECT_169);
-        data[24..28].copy_from_slice(&ASPECT_1610);
-        // table B: id-interleaved (4:3, 0, 16:9, 1, 16:10, 2)
-        data[64..68].copy_from_slice(&ASPECT_43);
-        data[72..76].copy_from_slice(&ASPECT_169);
-        data[80..84].copy_from_slice(&ASPECT_1610);
-        assert_eq!(aspect_slots(&data), vec![20, 72]);
-
-        let written = aspect(&mut data, 64.0 / 27.0).unwrap();
-        assert_eq!(written, 2);
-        assert_eq!(data[20..24], (64.0f32 / 27.0).to_le_bytes());
-        assert_eq!(data[72..76], (64.0f32 / 27.0).to_le_bytes());
-
-        // the patched slots are still found and restored to native
-        assert_eq!(aspect_slots(&data), vec![20, 72]);
-        let restored = aspect(&mut data, 16.0 / 9.0).unwrap();
-        assert_eq!(restored, 2);
-        assert_eq!(data[20..24], ASPECT_169);
-        assert_eq!(data[72..76], ASPECT_169);
-        // a second native run rewrites nothing
-        assert_eq!(aspect(&mut data, 16.0 / 9.0).unwrap(), 0);
-    }
-
-    #[test]
-    fn implausible_slot_values_are_left_alone() {
-        let mut data = vec![0u8; 64];
-        data[8..12].copy_from_slice(&ASPECT_43);
-        data[12..16].copy_from_slice(&9.9_f32.to_le_bytes()); // not an aspect
-        data[16..20].copy_from_slice(&ASPECT_1610);
-        assert!(aspect_slots(&data).is_empty());
-        assert_eq!(aspect(&mut data, 64.0 / 27.0).unwrap(), 0);
-    }
-
-    /// Applies the pacer fix to the real game folder when `SRR_GAME_DIR`
-    /// points at it (never committed data). Run manually with:
-    /// `SRR_GAME_DIR=... cargo test real_game -- --nocapture --ignored`
+    /// Every set on the real game when `SRR_GAME_DIR` names its folder
+    /// (never committed): `SRR_GAME_DIR=... cargo test real_game -- --ignored`.
     #[test]
     #[ignore]
     fn real_game() {
-        let Some(dir) = std::env::var_os("SRR_GAME_DIR") else {
-            panic!("set SRR_GAME_DIR to the game folder");
-        };
-        let path = std::path::Path::new(&dir).join(crate::edition::SSE1_EXE);
-        let mut data = std::fs::read(&path).expect("read the SSE1 exe");
-        let applied = pacer_verified(&mut data).expect("the clean build patches to the known hash");
-        println!("pacer applied: {applied}");
-        let digest = identify::sha256(&data);
-        if applied {
-            assert_eq!(
-                identify::hex(&digest),
-                "4c08c1deae28a329b6588138198556ac8eaded8444d0eb94a1fe2f1ad08f2520"
-            );
-        }
-        let slots = aspect_slots(&data);
-        println!("aspect slots: {slots:#x?}");
-        assert_eq!(slots, vec![0x2F7C44, 0x2FADA8]);
-        // An ultra-wide launch must not hide the stutter-fixed build.
-        aspect(&mut data, 21.0 / 9.0).unwrap();
-        assert!(std::ptr::eq(
-            identify_ignoring_aspect(&data).unwrap(),
-            &crate::edition::SSE1_PACER
-        ));
+        // The two ratios share their sites, so they are checked apart.
+        testing::assert_real_game("SRR_GAME_DIR", &[&PACER, &ASPECT_21_SSE1, &ASPECT_21_MAIN]);
+        testing::assert_real_game("SRR_GAME_DIR", &[&ASPECT_32_SSE1, &ASPECT_32_MAIN]);
     }
 }

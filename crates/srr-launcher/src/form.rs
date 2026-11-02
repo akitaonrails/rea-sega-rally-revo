@@ -1,47 +1,34 @@
+//! The settings window's state, independent of egui: what each control
+//! holds, the looks, and how it is saved to `launcher.cfg`.
+
 use rea_launcher::cfg;
 pub use rea_launcher::display::STEAM_DECK_SCREEN;
 
-use crate::config::{self, Aspect, FrameLimit, Quality, Settings};
+pub use crate::config::Look;
+use crate::config::{self, FrameLimit, Quality, Settings};
 
+/// The picture values a look sets; `resolution: None` is Auto (the
+/// screen's size).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Picture {
     pub resolution: Option<(u32, u32)>,
-    pub aspect: Option<Aspect>,
     pub quality: Quality,
     pub vsync: bool,
 }
 
 impl Picture {
-    pub const MODERN: Picture = Picture {
-        resolution: None,
-        aspect: None,
-        quality: Quality::High,
-        vsync: true,
-    };
+    fn of(look: Look) -> Option<Picture> {
+        look.preset().map(|preset| Picture {
+            resolution: preset.resolution,
+            quality: preset.quality,
+            vsync: preset.vsync,
+        })
+    }
 
-    pub const STEAM_DECK: Picture = Picture {
-        resolution: Some(STEAM_DECK_SCREEN),
-        aspect: Some(Aspect::Ratio1610),
-        quality: Quality::High,
-        vsync: true,
-    };
-
-    pub const ORIGINAL: Picture = Picture {
-        resolution: Some((1280, 720)),
-        aspect: Some(Aspect::Ratio169),
-        quality: Quality::Normal,
-        vsync: true,
-    };
-
+    /// The values with Auto worked out for `screen`.
     pub fn resolved(self, screen: Option<(u32, u32)>) -> Picture {
-        let settings = Settings {
-            resolution: self.resolution,
-            aspect: self.aspect,
-            ..Settings::default()
-        };
         Picture {
-            resolution: Some(settings.effective_resolution(screen)),
-            aspect: Some(settings.effective_aspect(screen)),
+            resolution: Some(config::resolve_resolution(self.resolution, screen)),
             ..self
         }
     }
@@ -53,43 +40,6 @@ pub fn recommended(screen: Option<(u32, u32)>) -> Look {
         Look::SteamDeck
     } else {
         Look::Modern
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Look {
-    Modern,
-    SteamDeck,
-    Original,
-    Custom,
-}
-
-impl Look {
-    /// The `look` key the window saves in launcher.cfg (window memory
-    /// only; the game and the command line never read it).
-    pub fn key(self) -> &'static str {
-        match self {
-            Look::Modern => "modern",
-            Look::SteamDeck => "steam-deck",
-            Look::Original => "original",
-            Look::Custom => "custom",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Look> {
-        [Look::Modern, Look::SteamDeck, Look::Original, Look::Custom]
-            .into_iter()
-            .find(|look| look.key().eq_ignore_ascii_case(value.trim()))
-    }
-
-    /// The preset's picture, `None` for Custom.
-    fn picture(self) -> Option<Picture> {
-        match self {
-            Look::Modern => Some(Picture::MODERN),
-            Look::SteamDeck => Some(Picture::STEAM_DECK),
-            Look::Original => Some(Picture::ORIGINAL),
-            Look::Custom => None,
-        }
     }
 }
 
@@ -109,10 +59,9 @@ pub struct Form {
 impl Form {
     pub fn new(settings: &Settings, screen: Option<(u32, u32)>) -> Form {
         let picture = Picture {
-            resolution: settings.resolution,
-            aspect: settings.aspect,
+            resolution: settings.resolution.flatten(),
             quality: settings.effective_quality(),
-            vsync: settings.vsync.unwrap_or(true),
+            vsync: settings.effective_vsync(),
         };
         Form {
             game: settings
@@ -124,7 +73,7 @@ impl Form {
             picture,
             frame_limit: settings.effective_frame_limit(),
             stutter_fix: settings.effective_stutter_fix(),
-            language: settings.effective_language(),
+            language: settings.effective_language().to_string(),
         }
     }
 
@@ -149,14 +98,10 @@ impl Form {
         let Some(text) = saved.filter(|text| !text.trim().is_empty()) else {
             return Form::first_run(screen);
         };
-        let mut form = Form::new(&Settings::parse_file(text).0, screen);
-        let remembered = cfg::entries(text)
-            .filter(|entry| entry.key == "look")
-            .filter_map(|entry| Look::parse(entry.value))
-            .last();
-        if let Some(look) = remembered {
-            let fits = look
-                .picture()
+        let settings = Settings::parse_file(text).0;
+        let mut form = Form::new(&settings, screen);
+        if let Some(look) = settings.look {
+            let fits = Picture::of(look)
                 .is_none_or(|preset| preset.resolved(screen) == form.picture.resolved(screen));
             if fits {
                 form.look = look;
@@ -170,15 +115,10 @@ impl Form {
     /// same picture, and there the Deck is the one to show.
     pub fn look_of(picture: &Picture, screen: Option<(u32, u32)>) -> Look {
         let picture = picture.resolved(screen);
-        if picture == Picture::STEAM_DECK {
-            Look::SteamDeck
-        } else if picture == Picture::MODERN.resolved(screen) {
-            Look::Modern
-        } else if picture == Picture::ORIGINAL {
-            Look::Original
-        } else {
-            Look::Custom
-        }
+        [Look::SteamDeck, Look::Modern, Look::Original]
+            .into_iter()
+            .find(|look| Picture::of(*look).map(|p| p.resolved(screen)) == Some(picture))
+            .unwrap_or(Look::Custom)
     }
 
     /// Picks a look; Modern, Steam Deck and Original set the picture,
@@ -186,33 +126,37 @@ impl Form {
     /// is, never worked out again from the values.
     pub fn set_look(&mut self, look: Look) {
         self.look = look;
-        match look {
-            Look::Modern => self.picture = Picture::MODERN,
-            Look::SteamDeck => self.picture = Picture::STEAM_DECK,
-            Look::Original => self.picture = Picture::ORIGINAL,
-            Look::Custom => {}
+        if let Some(picture) = Picture::of(look) {
+            self.picture = picture;
         }
     }
 
+    /// Changes the picture values and works out the look again.
+    pub fn edit_picture(&mut self, picture: Picture, screen: Option<(u32, u32)>) {
+        if picture != self.picture {
+            self.picture = picture;
+            self.look = Form::look_of(&picture, screen);
+        }
+    }
+
+    /// The settings file with every window value written (Auto saved as
+    /// the size it stands for on this screen).
     pub fn save(&self, text: &str, screen: Option<(u32, u32)>) -> String {
         let picture = self.picture.resolved(screen);
-        let mut out = cfg::set_key(text, "game", self.game.trim());
-        out = cfg::set_key(
-            &out,
-            "resolution",
-            &format!(
-                "{}x{}",
-                picture.resolution.unwrap().0,
-                picture.resolution.unwrap().1
-            ),
-        );
-        out = cfg::set_key(&out, "aspect", picture.aspect.unwrap().key());
-        out = cfg::set_key(&out, "quality", picture.quality.key());
-        out = cfg::set_key(&out, "vsync", &picture.vsync.to_string());
-        out = cfg::set_key(&out, "frame-limit", self.frame_limit.key());
-        out = cfg::set_key(&out, "stutter-fix", &self.stutter_fix.to_string());
-        out = cfg::set_key(&out, "language", &self.language);
-        cfg::set_key(&out, "look", self.look.key())
+        let (width, height) = picture.resolution.expect("resolved");
+        let values = [
+            ("game", self.game.trim().to_string()),
+            ("look", self.look.key().to_string()),
+            ("resolution", format!("{width}x{height}")),
+            ("quality", picture.quality.key().to_string()),
+            ("vsync", cfg::on_off(picture.vsync).to_string()),
+            ("frame_limit", self.frame_limit.key().to_string()),
+            ("stutter_fix", cfg::on_off(self.stutter_fix).to_string()),
+            ("language", self.language.clone()),
+        ];
+        values.iter().fold(text.to_string(), |out, (key, value)| {
+            config::set_key(&out, key, value)
+        })
     }
 }
 
@@ -232,10 +176,17 @@ pub fn frame_limit_disabled(dxvk: bool) -> Option<&'static str> {
     (!dxvk).then_some("Needs DXVK: Linux, Wine or Proton. On Windows the game follows vsync.")
 }
 
-pub fn resolutions(screen: Option<(u32, u32)>) -> Vec<(Option<(u32, u32)>, String)> {
+/// The resolution chips: Auto, the screen's own size, 1080p, 1440p, 4K,
+/// and the current value when it is none of those (a size set in the
+/// file or on the command line stays visible and selected).
+pub fn resolutions(
+    screen: Option<(u32, u32)>,
+    current: Option<(u32, u32)>,
+) -> Vec<(Option<(u32, u32)>, String)> {
     let common = [(1920, 1080), (2560, 1440), (3840, 2160)];
     let mut out = vec![(None, "Auto".to_string())];
-    if let Some(size) = screen.and_then(config::landscape)
+    let screen = screen.and_then(config::landscape);
+    if let Some(size) = screen
         && !common.contains(&size)
     {
         out.push((Some(size), format!("Screen {}×{}", size.0, size.1)));
@@ -248,22 +199,24 @@ pub fn resolutions(screen: Option<(u32, u32)>) -> Vec<(Option<(u32, u32)>, Strin
         };
         out.push((Some((width, height)), label.to_string()));
     }
+    if let Some(size) = current
+        && !out.iter().any(|(value, _)| *value == Some(size))
+    {
+        out.push((Some(size), format!("{}×{}", size.0, size.1)));
+    }
     out
 }
-
-pub const ASPECTS: [(Option<Aspect>, &str); 5] = [
-    (None, "Auto"),
-    (Some(Aspect::Ratio169), "16:9"),
-    (Some(Aspect::Ratio1610), "16:10"),
-    (Some(Aspect::Ratio219), "21:9"),
-    (Some(Aspect::Ratio329), "32:9"),
-];
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const SCREEN: Option<(u32, u32)> = Some((3840, 2160));
+    const DECK: Option<(u32, u32)> = Some(STEAM_DECK_SCREEN);
+
+    fn template() -> String {
+        config::template()
+    }
 
     #[test]
     fn first_run_is_modern_4k() {
@@ -278,13 +231,20 @@ mod tests {
     #[test]
     fn saved_modern_settings_remain_modern() {
         let form = Form::first_run(SCREEN);
-        let text = form.save(config::TEMPLATE, SCREEN);
-        let (settings, _) = Settings::parse_file(&text);
+        let text = form.save(&template(), SCREEN);
+        let (settings, warnings) = Settings::parse_file(&text);
+        assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(Form::new(&settings, SCREEN).look, Look::Modern);
-        assert!(text.contains("resolution = 3840x2160"));
-        assert!(text.contains("aspect = 16:9"));
-        assert!(text.contains("frame-limit = 60"));
-        assert!(text.contains("stutter-fix = true"));
+        for line in [
+            "resolution = 3840x2160",
+            "frame_limit = 60",
+            "stutter_fix = on",
+            "vsync = on",
+            "look = modern",
+        ] {
+            assert!(text.contains(line), "{line}");
+        }
+        assert!(!text.contains("aspect ="));
     }
 
     #[test]
@@ -294,7 +254,6 @@ mod tests {
         assert_eq!(form.picture.quality, Quality::Normal);
         assert_eq!(form.picture.resolution, Some((1280, 720)));
         form.set_look(Look::SteamDeck);
-        assert_eq!(form.picture.aspect, Some(Aspect::Ratio1610));
         assert_eq!(form.picture.resolution, Some(STEAM_DECK_SCREEN));
     }
 
@@ -303,11 +262,17 @@ mod tests {
         let mut form = Form::first_run(SCREEN);
         form.game = r"D:\Games\Sega Rally".into();
         form.set_look(Look::SteamDeck);
-        form.picture.vsync = false;
+        form.edit_picture(
+            Picture {
+                vsync: false,
+                ..form.picture
+            },
+            SCREEN,
+        );
         form.frame_limit = FrameLimit::Off;
         form.stutter_fix = false;
         form.language = "Polish".into();
-        let (settings, warnings) = Settings::parse_file(&form.save(config::TEMPLATE, SCREEN));
+        let (settings, warnings) = Settings::parse_file(&form.save(&template(), SCREEN));
         assert!(warnings.is_empty(), "{warnings:?}");
         let loaded = Form::new(&settings, SCREEN);
         assert_eq!(loaded.game, form.game);
@@ -317,53 +282,46 @@ mod tests {
         assert_eq!(loaded.language, "Polish");
         // vsync off makes it a custom look, not the Steam Deck preset
         assert_eq!(loaded.look, Look::Custom);
+        assert_eq!(form.look, Look::Custom);
     }
-
-    const DECK: Option<(u32, u32)> = Some(STEAM_DECK_SCREEN);
 
     #[test]
     fn only_a_missing_or_blank_file_is_a_first_run() {
-        let deck = Some(STEAM_DECK_SCREEN);
-        let first = Form::first_run(deck);
-        assert_eq!(Form::from_file(None, deck), first);
-        assert_eq!(Form::from_file(Some(""), deck), first);
-        assert_eq!(Form::from_file(Some(" \r\n"), deck), first);
+        let first = Form::first_run(DECK);
+        assert_eq!(Form::from_file(None, DECK), first);
+        assert_eq!(Form::from_file(Some(""), DECK), first);
+        assert_eq!(Form::from_file(Some(" \r\n"), DECK), first);
         assert_eq!(first.look, Look::SteamDeck);
         // The template saved word for word is the player's file: its values
         // decide, so the Deck preset is not forced onto it.
-        let kept = Form::from_file(Some(config::TEMPLATE), deck);
-        assert_eq!(
-            kept,
-            Form::new(&Settings::parse_file(config::TEMPLATE).0, deck)
-        );
+        let kept = Form::from_file(Some(&template()), DECK);
+        assert_eq!(kept, Form::new(&Settings::parse_file(&template()).0, DECK));
         // A file holding only the game folder (written by --game) too.
-        let with_game = cfg::set_key(config::TEMPLATE, "game", r"D:\Sega Rally");
+        let with_game = config::set_key(&template(), "game", r"D:\Sega Rally");
         assert_eq!(
-            Form::from_file(Some(&with_game), deck).game,
+            Form::from_file(Some(&with_game), DECK).game,
             r"D:\Sega Rally"
         );
     }
 
     #[test]
     fn a_saved_look_reopens_as_itself_while_its_values_fit() {
-        let deck = Some(STEAM_DECK_SCREEN);
-        for look in [Look::Modern, Look::SteamDeck, Look::Original, Look::Custom] {
-            let mut form = Form::first_run(deck);
+        for look in Look::ALL {
+            let mut form = Form::first_run(DECK);
             form.set_look(look);
-            let text = form.save(config::TEMPLATE, deck);
+            let text = form.save(&template(), DECK);
             assert!(text.contains(&format!("look = {}", look.key())));
-            assert_eq!(Form::from_file(Some(&text), deck).look, look, "{look:?}");
+            assert_eq!(Form::from_file(Some(&text), DECK).look, look, "{look:?}");
             assert_eq!(Look::parse(look.key()), Some(look));
         }
         // A hand edit that breaks the preset falls back to the values.
-        let mut form = Form::first_run(deck);
+        let mut form = Form::first_run(DECK);
         form.set_look(Look::Modern);
-        let edited = cfg::set_key(&form.save(config::TEMPLATE, deck), "quality", "ultra");
-        assert_eq!(Form::from_file(Some(&edited), deck).look, Look::Custom);
-        // An unknown look name is ignored, and is not a settings warning.
-        let odd = cfg::set_key(&form.save(config::TEMPLATE, deck), "look", "fancy");
-        assert_eq!(Form::from_file(Some(&odd), deck).look, Look::SteamDeck);
-        assert!(Settings::parse_file(&odd).1.is_empty());
+        let edited = config::set_key(&form.save(&template(), DECK), "quality", "ultra");
+        assert_eq!(Form::from_file(Some(&edited), DECK).look, Look::Custom);
+        // An unknown look name is ignored (with a warning in the log).
+        let odd = config::set_key(&form.save(&template(), DECK), "look", "fancy");
+        assert_eq!(Form::from_file(Some(&odd), DECK).look, Look::SteamDeck);
     }
 
     #[test]
@@ -384,30 +342,27 @@ mod tests {
 
         let form = Form::first_run(DECK);
         assert_eq!(form.look, Look::SteamDeck);
-        assert_eq!(form.picture, Picture::STEAM_DECK);
 
         // Picking Steam Deck on a Deck stays Steam Deck (its values equal
         // Modern there) and so does reloading what it saved.
         let mut form = Form::first_run(DECK);
         form.set_look(Look::Modern);
+        assert_eq!(form.look, Look::Modern);
         form.set_look(Look::SteamDeck);
         assert_eq!(form.look, Look::SteamDeck);
-        let (settings, _) = Settings::parse_file(&form.save(config::TEMPLATE, DECK));
+        let (settings, _) = Settings::parse_file(&form.save(&template(), DECK));
         assert_eq!(Form::new(&settings, DECK).look, Look::SteamDeck);
-    }
-
-    #[test]
-    fn a_picked_look_is_remembered_even_when_values_match_another() {
-        let mut form = Form::first_run(DECK);
-        form.set_look(Look::Modern);
-        assert_eq!(form.look, Look::Modern);
     }
 
     #[test]
     fn one_changed_value_is_custom() {
         let mut form = Form::first_run(SCREEN);
-        form.picture.quality = Quality::Ultra;
-        assert_eq!(Form::look_of(&form.picture, SCREEN), Look::Custom);
+        let picture = Picture {
+            quality: Quality::Ultra,
+            ..form.picture
+        };
+        form.edit_picture(picture, SCREEN);
+        assert_eq!(form.look, Look::Custom);
     }
 
     #[test]
@@ -421,5 +376,33 @@ mod tests {
         assert_eq!(stutter_fix_disabled(Some(true)), None);
         assert!(frame_limit_disabled(false).unwrap().contains("DXVK"));
         assert_eq!(frame_limit_disabled(true), None);
+    }
+
+    #[test]
+    fn a_size_from_the_file_gets_its_own_chip() {
+        let chips = resolutions(SCREEN, None);
+        assert_eq!(
+            chips
+                .iter()
+                .map(|(_, label)| label.as_str())
+                .collect::<Vec<_>>(),
+            ["Auto", "1080p", "1440p", "4K"]
+        );
+        let chips = resolutions(Some((3440, 1440)), Some((2560, 1080)));
+        assert_eq!(
+            chips
+                .iter()
+                .map(|(_, label)| label.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Auto",
+                "Screen 3440×1440",
+                "1080p",
+                "1440p",
+                "4K",
+                "2560×1080"
+            ]
+        );
+        assert_eq!(resolutions(SCREEN, Some((1920, 1080))).len(), 4);
     }
 }
