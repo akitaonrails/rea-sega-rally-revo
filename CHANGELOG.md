@@ -5,7 +5,9 @@
 - **No more "Player Progress Data Corrupt" / "Local Leaderboard Corrupt"
   on a first start.** The launcher created empty save and leaderboard
   files, which the game reported as corrupt; it now lets the game make
-  them.
+  them. Empty files left by an earlier release are removed at the next
+  launch (the game recreates them); a save the game wrote is never
+  touched.
 - **Polish menus work.** Polish needs the registry's `sku` set to `polish`;
   the launcher wrote `Europe`, so `language = Polish` showed English menus
   (seen in the game). Choosing another language sets `Europe` again; with

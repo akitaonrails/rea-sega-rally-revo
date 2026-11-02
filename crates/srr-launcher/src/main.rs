@@ -495,6 +495,13 @@ mod app {
         }
 
         gamecfg::prepare_documents(&documents)?;
+        let removed = gamecfg::remove_old_seeds(&documents);
+        if removed > 0 {
+            log_line(&format!(
+                "saves: removed {removed} empty save file(s) left by an earlier release; \
+                 the game creates them"
+            ));
+        }
         // Earlier releases built config.ini at `config.ini.srr-tmp`.
         if let Err(error) =
             fsx::remove_stale_temps_here(&documents.saved_games, &[gamecfg::OLD_TEMP_SUFFIX])

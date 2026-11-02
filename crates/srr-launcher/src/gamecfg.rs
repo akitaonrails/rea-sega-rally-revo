@@ -323,6 +323,23 @@ pub fn prepare_documents(documents: &DocumentsPaths) -> Result<(), String> {
     Ok(())
 }
 
+/// Remove the save files earlier releases seeded: a zero-byte
+/// `SEGA Rally.dat` or `SR_RANKTABLES.DAT` was never written by the game
+/// (it called it corrupt), so the game recreates it. Any other file is the
+/// player's and stays. Returns how many were removed.
+pub fn remove_old_seeds(documents: &DocumentsPaths) -> usize {
+    [
+        documents.saved_games.join(SAVE_FILE),
+        documents.rank_table.join(RANK_TABLE_FILE),
+    ]
+    .iter()
+    .filter(|path| {
+        std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() == 0)
+            && std::fs::remove_file(path).is_ok()
+    })
+    .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -597,6 +614,31 @@ mod tests {
         }
         assert!(!documents.saved_games.join(SAVE_FILE).exists());
         assert!(!documents.rank_table.join(RANK_TABLE_FILE).exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_old_empty_seeds_go_and_real_saves_stay() {
+        let root = temp("upgrade");
+        let documents = documents_paths(&root.join("me"), &root.join("Public"));
+        prepare_documents(&documents).unwrap();
+        let save = documents.saved_games.join(SAVE_FILE);
+        let ranks = documents.rank_table.join(RANK_TABLE_FILE);
+        // Earlier releases left zero-byte files the game never wrote.
+        std::fs::write(&save, b"").unwrap();
+        std::fs::write(&ranks, b"").unwrap();
+        assert_eq!(remove_old_seeds(&documents), 2);
+        assert!(!save.exists() && !ranks.exists());
+        // Anything else is the player's: kept byte for byte.
+        std::fs::write(&save, b"progress").unwrap();
+        std::fs::write(&ranks, b"\0").unwrap();
+        assert_eq!(remove_old_seeds(&documents), 0);
+        assert_eq!(std::fs::read(&save).unwrap(), b"progress");
+        assert_eq!(std::fs::read(&ranks).unwrap(), b"\0");
+        // Nothing there: nothing to do.
+        std::fs::remove_file(&save).unwrap();
+        std::fs::remove_file(&ranks).unwrap();
+        assert_eq!(remove_old_seeds(&documents), 0);
         std::fs::remove_dir_all(&root).unwrap();
     }
 
