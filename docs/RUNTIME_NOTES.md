@@ -152,13 +152,24 @@ linked from the README (hosted outside the repository).
 Changed by code audit and covered by unit/shell tests only; none of this
 was exercised against the real game yet:
 
-- **winebus value names.** `DisableHidraw`/`DisableInput` are now really
-  set (the old spaced names were ignored by Wine, so the reference setup
-  ran with hidraw/evdev duplicates enabled and still worked). Check that
-  the 8BitDo pad still appears exactly once in the game's controller
-  options, that steering/buttons still work, and that the settings window's
-  pad navigation still works, both through `srr-play` and with Steam's
-  Proton running `SRRLauncher.exe` directly (second start).
+- **FIRST: winebus hidraw/evdev now really disabled — a behaviour change.**
+  `DisableHidraw`/`DisableInput` are now really set. The old spaced names
+  were ignored by Wine, so every verified run so far (including the user's
+  recorded race) had hidraw/evdev devices enabled. This matches the
+  documented design and OutRun's tested values, but on this game it is
+  unverified. Check that the 8BitDo pad appears exactly once in the game's
+  controller options, that steering, pedals and buttons work in a race,
+  and that the settings window's pad navigation works, through `srr-play`,
+  the AppImage, and Steam's Proton running `SRRLauncher.exe` directly
+  (second start). If it regresses, revert per prefix (values that exist
+  are never overwritten):
+
+  ```sh
+WINEPREFIX=~/.local/share/srr-launcher/prefix wine reg add \
+  'HKLM\System\CurrentControlSet\Services\winebus' /v DisableHidraw /t REG_DWORD /d 0 /f
+WINEPREFIX=~/.local/share/srr-launcher/prefix wine reg add \
+  'HKLM\System\CurrentControlSet\Services\winebus' /v DisableInput /t REG_DWORD /d 0 /f
+  ```
 - **NVIDIA ICD pinning** now also requires an NVIDIA PCI device or the
   `nvidia` module, and exports `VK_DRIVER_FILES`. On the reference host
   (RTX 5090 + iGPU) `srr-play` should still print the NVIDIA pin and DXVK

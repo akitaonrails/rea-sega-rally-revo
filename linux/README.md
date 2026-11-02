@@ -6,7 +6,9 @@ game needs already wired:
 - a private Wine prefix (default `~/.local/share/srr-launcher/prefix`)
 - Wine's SDL controller bridge configured for this game (`Map Controllers=1`,
   `Enable SDL=1`, raw duplicates off with `DisableHidraw=1`/`DisableInput=1`),
-  seeded once per prefix before Wine starts; existing values are kept
+  seeded once per prefix before Wine starts; existing values are kept, so
+  setting `DisableHidraw`/`DisableInput` to 0 in the prefix reverts it
+  (see CHANGELOG)
 - optional `winetricks d3dx9 directplay d3dcompiler_47` when `winetricks`
   is installed — the offline DirectX runtime equivalents that stop this
   game's main-menu access violation (skip with `SRR_WINETRICKS=off`)

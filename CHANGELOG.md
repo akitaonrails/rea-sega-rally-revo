@@ -2,11 +2,26 @@
 
 ## Unreleased
 
-- The controller bridge now actually disables Wine's raw hidraw/evdev
-  duplicates: `srr-play` wrote `Disable Hidraw`/`Disable Input` (with a
-  space), names Wine never reads. It now writes `DisableHidraw`/
-  `DisableInput`, only when absent, and `SRRLauncher.exe` seeds the same
-  values itself, so it also works when Proton runs the launcher directly.
+- **Controller behaviour change on Linux.** The controller bridge now
+  really disables Wine's raw hidraw/evdev devices. `srr-play` used to
+  write `Disable Hidraw`/`Disable Input` (with a space), names Wine never
+  reads, so every earlier release ran with those devices enabled. It now
+  writes `DisableHidraw`/`DisableInput` (the documented design, and the
+  values the OutRun 2006 launcher was tested with), only when absent, and
+  `SRRLauncher.exe` seeds the same values itself, so it also works when
+  Proton runs the launcher directly. Not yet checked with a real pad. If
+  your pad stops working or appears twice, switch them back off (the
+  launcher keeps values that already exist):
+
+  ```sh
+WINEPREFIX=~/.local/share/srr-launcher/prefix wine reg add \
+  'HKLM\System\CurrentControlSet\Services\winebus' /v DisableHidraw /t REG_DWORD /d 0 /f
+WINEPREFIX=~/.local/share/srr-launcher/prefix wine reg add \
+  'HKLM\System\CurrentControlSet\Services\winebus' /v DisableInput /t REG_DWORD /d 0 /f
+  ```
+
+  For Steam's Proton, run the same with `WINEPREFIX` set to the game's
+  `compatdata/<appid>/pfx`.
 - `srr-play` no longer pins the NVIDIA Vulkan driver on hosts with a
   leftover NVIDIA ICD but no NVIDIA GPU (that left DXVK with no device). It
   also finds ICDs in `/etc/vulkan/icd.d`, sets `VK_DRIVER_FILES` next to the
