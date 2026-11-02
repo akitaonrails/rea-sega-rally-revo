@@ -16,7 +16,10 @@
   that session's process group before shutting down the prefix's Wine
   server, and a stray game process no longer blocks a start. The launcher
   path is passed to the generated `inner.sh` as an argument, so a folder
-  name with a quote can no longer break or inject into it.
+  name with a quote can no longer break or inject into it. Ctrl+C on a
+  waiting launch (the AppImage) waits for the session's own cleanup, and a
+  lock left by v0.1.x (pid only) with a live pid still reads as running,
+  so upgrading mid-session does not start a second game.
 - The GitHub test-report template was copied from the DiRT launcher; it now
   asks about Sega Rally Revo (`SRRLauncher`, `srr-play`, which executable).
 - Look cards: Custom now stays selected when clicked (it used to jump back

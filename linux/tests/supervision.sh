@@ -70,6 +70,38 @@ stop_session > /dev/null
 if kill -0 "$OTHER_PID" 2>/dev/null; then ok "unrelated game process was not signaled"; else fail "unrelated helper was signaled"; fi
 stop_helper "$OTHER_PID" "$OTHER_START"; OTHER_PID= OTHER_START=
 
+# A v0.1.x lock (pid only) with a live pid still counts as running, so an
+# upgrade does not start a second session; stop ends it.
+setsid sleep 30 & OTHER_PID=$!
+sleep 0.2
+echo "$OTHER_PID" > "$LOCK"
+if running; then ok "old pid-only lock with a live pid is running"; else fail "old-format lock ignored"; fi
+stop_session > /dev/null
+wait "$OTHER_PID"; rc=$?
+if [ "$rc" = 143 ]; then ok "stop ended the old-format session"; else fail "old session ended with $rc"; fi
+OTHER_PID= OTHER_START=
+echo 999999999 > "$LOCK"
+if running; then fail "dead old-format pid reported running"; else ok "dead old-format pid is idle"; fi
+rm -f "$LOCK"
+
+# Interrupting a waiting launch signals the session and waits for it.
+cat > "$T/slow" <<'SLOW'
+#!/bin/sh
+trap 'sleep 1; echo cleaned > "$T/cleaned"; exit 0' TERM
+sleep 30 & wait
+SLOW
+chmod +x "$T/slow"
+(
+  RUN= SRR_WAIT=1
+  launch "$T/slow"
+) &
+SUP=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$LOCK" ] && break; sleep 0.2; done
+sleep 0.3
+kill -TERM "$SUP"; wait "$SUP"; rc=$?
+if [ "$rc" = 143 ] && [ -f "$T/cleaned" ]; then ok "interrupt waited for the session's cleanup"; else fail "interrupt rc=$rc cleaned=$(cat "$T/cleaned" 2>/dev/null)"; fi
+[ -f "$LOCK" ] && fail "interrupt left the lock" || ok "interrupt removed the lock"
+
 # Waiting launch (the AppImage): the lock goes away on natural exit.
 mkdir -p "$T/launcher it's \$(here)"
 LAUNCHER=$T/"launcher it's \$(here)"/SRRLauncher.exe; : > "$LAUNCHER"

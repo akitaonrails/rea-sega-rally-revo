@@ -72,7 +72,17 @@ session_valid() {
   [ "$stats" = "$LOCK_PID $LOCK_START" ]
 }
 
-running() { session_valid; }
+# v0.1.x wrote the pid alone. A live pid from such a lock is still taken
+# as running, so an upgrade mid-session does not start a second game.
+legacy_session() {
+  [ -r "$LOCK" ] || return 1
+  IFS=' ' read -r LEGACY_PID LEGACY_REST < "$LOCK" || return 1
+  [ -z "$LEGACY_REST" ] || return 1
+  case "$LEGACY_PID" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$LEGACY_PID" 2>/dev/null
+}
+
+running() { session_valid || legacy_session; }
 
 # Choose the Vulkan driver for DXVK on hybrid-GPU hosts. When an NVIDIA GPU
 # is present and its ICD coexists with another vendor's ICD, pin NVIDIA:
@@ -201,6 +211,8 @@ launch_interrupted() {
   trap - EXIT HUP INT TERM
   if session_valid; then
     kill -TERM "-$LOCK_PID" 2>/dev/null || true
+    # Let inner.sh run its own cleanup (wineserver -k) before we leave.
+    wait "$LOCK_PID" 2>/dev/null
   fi
   rm -f "$LOCK"
   exit 143
@@ -234,6 +246,9 @@ launch() {
 stop_session() {
   if session_valid; then
     kill -TERM "-$LOCK_PID" 2>/dev/null || true
+  elif legacy_session; then
+    # v0.1.x stopped its launch the same way (the pid was a setsid leader).
+    kill -TERM "$LEGACY_PID" 2>/dev/null || true
   fi
   rm -f "$LOCK"
   $RUN env WINEPREFIX="$PREFIX" wineserver -k 2>/dev/null
