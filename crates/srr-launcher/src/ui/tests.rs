@@ -189,6 +189,11 @@ fn disabled_controls_say_why() {
     let fps = ui.get_by_label("120 fps");
     assert!(testing::disabled(&fps));
     assert!(testing::description(&fps).unwrap().contains("Needs DXVK"));
+    // The row (SDK spec_row_with) gives the reason after its description.
+    let row = ui.get_by_role_and_label(Role::RadioGroup, "Frame limit");
+    let text = testing::description(&row).unwrap();
+    assert!(text.starts_with(config::option("frame_limit").description));
+    assert!(text.contains("Needs DXVK"));
     let fix = ui.get_by_label("On (recommended)");
     assert!(testing::disabled(&fix));
     assert!(testing::description(&fix).unwrap().contains("game folder"));

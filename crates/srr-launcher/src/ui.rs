@@ -6,16 +6,17 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rea_launcher::cfg;
 use rea_launcher::download::{self, Job};
 use rea_launcher::fsx;
 use rea_launcher_ui::download::{Download, DownloadAction, DownloadState, download_row};
 use rea_launcher_ui::egui::{self, Align2, Key, Rect, Response, TextureHandle, pos2, vec2};
 use rea_launcher_ui::pad::{self, Nav, PadNav};
-use rea_launcher_ui::spec::mark_rendered;
+use rea_launcher_ui::spec::{RowOptions, mark_rendered, spec_row_with};
 use rea_launcher_ui::theme::{body, decal, semibold};
-use rea_launcher_ui::widgets::{self, Chip, Crop, LookCard};
+use rea_launcher_ui::widgets::{self, Crop, LookCard};
 use rea_launcher_ui::window::Layout;
-use srr_launcher::config::{self, Aspect, FrameLimit, LANGUAGES, Quality};
+use srr_launcher::config::{self, Aspect, FrameLimit, Quality};
 use srr_launcher::directx;
 use srr_launcher::edition::{self, GameEditions};
 use srr_launcher::form::{self, Form, Look, Picture};
@@ -394,24 +395,21 @@ impl Window {
             );
         }
         let frame_disabled = form::frame_limit_disabled(self.host.dxvk);
-        option_row(ui, "frame_limit", |ui| {
-            widgets::chips(
-                ui,
-                &FrameLimit::ALL.map(|limit| (limit, limit.label())),
-                &mut self.form.frame_limit,
-                frame_disabled,
-            )
-        });
+        if let Some(text) = table_row(
+            ui,
+            "frame_limit",
+            self.form.frame_limit.key(),
+            frame_disabled,
+        ) && let Some(limit) = FrameLimit::parse(&text)
+        {
+            self.form.frame_limit = limit;
+        }
         ui.add_space(8.0);
 
         widgets::heading(ui, "Language");
-        option_row(ui, "language", |ui| {
-            let options: Vec<(String, &str)> = LANGUAGES
-                .iter()
-                .map(|language| ((*language).to_string(), *language))
-                .collect();
-            widgets::chips(ui, &options, &mut self.form.language, None)
-        });
+        if let Some(text) = table_row(ui, "language", &self.form.language, None) {
+            self.form.language = text;
+        }
         ui.add_space(8.0);
 
         self.directx_section(ui);
@@ -490,23 +488,14 @@ impl Window {
         ui.add_space(12.0);
 
         widgets::heading(ui, "Detail");
-        option_row(ui, "quality", |ui| {
-            let chips: Vec<Chip<'_, Quality>> = Quality::ALL
-                .iter()
-                .map(|quality| {
-                    let label = match quality {
-                        Quality::Normal => "Normal",
-                        Quality::High => "High",
-                        Quality::Ultra => "Ultra",
-                    };
-                    Chip::new(*quality, label)
-                })
-                .collect();
-            widgets::chips_with(ui, &chips, &mut picture.quality)
-        });
-        option_row(ui, "vsync", |ui| {
-            widgets::toggle(ui, &mut picture.vsync, "Vsync", None)
-        });
+        if let Some(text) = table_row(ui, "quality", picture.quality.key(), None)
+            && let Some(quality) = Quality::parse(&text)
+        {
+            picture.quality = quality;
+        }
+        if let Some(text) = table_row(ui, "vsync", cfg::on_off(picture.vsync), None) {
+            picture.vsync = text == cfg::on_off(true);
+        }
         self.form.edit_picture(picture, screen);
     }
 
@@ -556,32 +545,40 @@ impl Window {
     }
 }
 
-/// One option's row: its label from the option table, the control, and
-/// the option's one-line description under it; the control gets both as
-/// its accessible name and description, and the key is recorded for the
-/// parity test.
+/// One option's row drawn by the SDK from the option table
+/// (`spec_row_with`: label, control, description, the disabled reason)
+/// over the window's typed value, given as its `launcher.cfg` text; the
+/// new text when the player changed it.
+fn table_row(ui: &mut egui::Ui, key: &str, text: &str, disabled: Option<&str>) -> Option<String> {
+    let mut value = text.to_string();
+    let options = RowOptions {
+        disabled,
+        ..RowOptions::default()
+    };
+    let response = spec_row_with(ui, config::option(key), &mut value, options);
+    ui.add_space(6.0);
+    (response.changed() && value != text).then_some(value)
+}
+
+/// A row the SDK cannot draw from the table yet, laid out as
+/// `spec_row_with` lays out a chip row: the label, the control, the
+/// description under them; the control is named and described for
+/// screen readers and the key is recorded for the parity test. Used for
+/// the resolution (a `Size` row as chips of the screen's sizes) and the
+/// stutter fix (a `Toggle` as chips that keep showing the saved value
+/// while disabled).
 fn option_row(ui: &mut egui::Ui, key: &str, control: impl FnOnce(&mut egui::Ui) -> Response) {
     let spec = config::option(key);
     mark_rendered(ui.ctx(), spec.key);
-    let response = ui
-        .horizontal_top(|ui| {
-            if spec.kind == rea_launcher::cfg::spec::Kind::Toggle {
-                ui.add_space(rea_launcher_ui::theme::metrics(ui.ctx()).field_width);
-            } else {
+    ui.vertical(|ui| {
+        let response = ui
+            .horizontal_top(|ui| {
                 widgets::field(ui, spec.label);
-            }
-            ui.vertical(|ui| {
-                let response = control(ui);
-                widgets::note(ui, spec.description);
-                response
+                control(ui)
             })
-            .inner
-        })
-        .inner;
-    let (label, description) = (spec.label, spec.description);
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(label.to_owned());
-        node.set_description(description.to_owned());
+            .inner;
+        widgets::name_control(&response, Some(spec.label), Some(spec.description));
+        widgets::note(ui, spec.description);
     });
     ui.add_space(6.0);
 }
