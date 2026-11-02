@@ -113,16 +113,13 @@ fn every_option_control_is_labelled_and_described() {
         );
     }
     assert!(ui.query_by_label("Modern").is_some());
-    assert!(
-        ui.query_by_role_and_label(Role::TextInput, "Game folder: the one with SEGA Rally.exe")
-            .is_some()
-            || ui
-                .query_by_role_and_label(
-                    Role::TextInput,
-                    "Game folder, e.g. Z:\\home\\you\\Games\\Sega Rally"
-                )
-                .is_some()
-    );
+    // The folder field is named by its heading; the hint describes it.
+    let folder = ui.get_by_role_and_label(Role::TextInput, "Game folder");
+    assert!(matches!(
+        testing::description(&folder).as_deref(),
+        Some("Game folder: the one with SEGA Rally.exe")
+            | Some("Game folder, e.g. Z:\\home\\you\\Games\\Sega Rally")
+    ));
     tab(&mut ui, "Picture");
     for key in ["resolution", "quality"] {
         let option = config::option(key);

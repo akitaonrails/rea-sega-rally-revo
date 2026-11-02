@@ -301,7 +301,7 @@ impl Window {
             "Game folder: the one with SEGA Rally.exe"
         };
         let pick = &self.host.pick_folder;
-        if widgets::folder_field(ui, &mut self.form.game, hint, pick) {
+        if widgets::folder_field(ui, &mut self.form.game, "Game folder", hint, pick) {
             self.error = None;
         }
         match &self.check {
