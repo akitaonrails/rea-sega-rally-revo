@@ -136,3 +136,13 @@ drive `D:` mapped to a symlink, so screenshots show no developer path.
 
 Not verified: the gamepad mapping change on a real pad (unit-tested
 against the XInput bit values only); the frame limit under Steam's Proton.
+
+## 2026-11-02 — the user's gameplay recording
+
+The user recorded a session with OBS on the reference host (AppImage,
+Hyprland, 4K): the launcher window, Play, about two minutes of first-run
+loading (game files on a NAS), the game's legal and title screens, then a
+Safari race driven with the 8BitDo pad in X-input mode through lap 2.
+This is the first recorded in-race gamepad control through the launcher
+(the game's native pad support, no remapping). The trimmed 1080p cut is
+linked from the README (hosted outside the repository).

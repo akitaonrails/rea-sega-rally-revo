@@ -7,6 +7,14 @@ Your installed game folder is never changed.
 
 ![The launcher's Play tab](docs/images/launcher-play.png)
 
+### See it running
+
+[![Video: the launcher starts Sega Rally Revo at 4K on Linux, then a Safari race driven with a gamepad (click to play)](https://new-uploads-akitaonrails.s3.us-east-2.amazonaws.com/2026/11/02/sega-rally-revo-launcher-poster.jpg)](https://new-uploads-akitaonrails.s3.us-east-2.amazonaws.com/2026/11/02/sega-rally-revo-launcher.mp4)
+
+The AppImage on a Linux desktop (Hyprland, RTX 5090, 4K): Play in the
+launcher, the game's own start-up, then a Safari race on a gamepad with
+the stutter fix applied (2:49; the first-run loading wait is cut out).
+
 ## What it fixes
 
 The 2007 PC release is a great rally game in a fragile package. Each row
