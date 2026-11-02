@@ -186,9 +186,8 @@ mod app {
                     Err(error) => log_line(&format!("warning: {error}")),
                 }
             }
-            let text =
-                fs::read_to_string(&settings_path).unwrap_or_else(|_| config::TEMPLATE.into());
-            match ui::show(&settings_path, &text, linux) {
+            let saved = fs::read_to_string(&settings_path).ok();
+            match ui::show(&settings_path, saved.as_deref(), linux) {
                 Ok(ui::Outcome::Play) => {
                     if settings_only {
                         return Ok(0);

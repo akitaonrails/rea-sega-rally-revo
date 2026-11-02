@@ -45,6 +45,9 @@
   you set is kept. Wine is also recognised from `WINEPREFIX`,
   `WINELOADER` or `STEAM_COMPAT_DATA_PATH` when a Wine build hides
   `wine_get_version`.
+- The settings window's first-run defaults (the recommended look) apply
+  only when `launcher.cfg` is missing or blank; a saved file that happens
+  to match the template is read as the player's settings.
 
 ## v0.1.1 - 2026-11-02
 

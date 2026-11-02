@@ -106,6 +106,19 @@ impl Form {
         form
     }
 
+    /// The form for a settings file's text: the recommended look when there
+    /// is no file yet (or it is blank), otherwise what the file says. A file
+    /// that happens to match the template word for word is the player's,
+    /// not a first run.
+    pub fn from_file(saved: Option<&str>, screen: Option<(u32, u32)>) -> Form {
+        match saved {
+            Some(text) if !text.trim().is_empty() => {
+                Form::new(&Settings::parse_file(text).0, screen)
+            }
+            _ => Form::first_run(screen),
+        }
+    }
+
     /// The look these picture values make on a screen. The Steam Deck
     /// preset is checked first: on a 1280×800 screen Modern resolves to the
     /// same picture, and there the Deck is the one to show.
@@ -302,6 +315,29 @@ mod tests {
     }
 
     const DECK: Option<(u32, u32)> = Some(STEAM_DECK_SCREEN);
+
+    #[test]
+    fn only_a_missing_or_blank_file_is_a_first_run() {
+        let deck = Some(STEAM_DECK_SCREEN);
+        let first = Form::first_run(deck);
+        assert_eq!(Form::from_file(None, deck), first);
+        assert_eq!(Form::from_file(Some(""), deck), first);
+        assert_eq!(Form::from_file(Some(" \r\n"), deck), first);
+        assert_eq!(first.look, Look::SteamDeck);
+        // The template saved word for word is the player's file: its values
+        // decide, so the Deck preset is not forced onto it.
+        let kept = Form::from_file(Some(config::TEMPLATE), deck);
+        assert_eq!(
+            kept,
+            Form::new(&Settings::parse_file(config::TEMPLATE).0, deck)
+        );
+        // A file holding only the game folder (written by --game) too.
+        let with_game = config::set_key(config::TEMPLATE, "game", r"D:\Sega Rally");
+        assert_eq!(
+            Form::from_file(Some(&with_game), deck).game,
+            r"D:\Sega Rally"
+        );
+    }
 
     #[test]
     fn custom_stays_selected_when_picked() {

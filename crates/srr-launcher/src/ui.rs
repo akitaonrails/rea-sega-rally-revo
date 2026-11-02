@@ -27,7 +27,7 @@ pub enum Outcome {
     Closed,
 }
 
-pub fn show(settings_path: &Path, text: &str, linux: bool) -> Result<Outcome, String> {
+pub fn show(settings_path: &Path, saved: Option<&str>, linux: bool) -> Result<Outcome, String> {
     let mut outcome = Outcome::Closed;
     let wine = win32::is_wine();
     let zoom = if wine {
@@ -48,7 +48,7 @@ pub fn show(settings_path: &Path, text: &str, linux: bool) -> Result<Outcome, St
         ..Default::default()
     };
     let path = settings_path.to_path_buf();
-    let text = text.to_string();
+    let saved = saved.map(str::to_string);
     eframe::run_native(
         "Sega Rally Revo",
         options,
@@ -58,7 +58,7 @@ pub fn show(settings_path: &Path, text: &str, linux: bool) -> Result<Outcome, St
             Ok(Box::new(Window::new(
                 &cc.egui_ctx,
                 path,
-                text,
+                saved,
                 linux,
                 &mut outcome,
             )))
@@ -235,16 +235,13 @@ impl<'a> Window<'a> {
     fn new(
         ctx: &egui::Context,
         path: PathBuf,
-        text: String,
+        saved: Option<String>,
         linux: bool,
         outcome: &'a mut Outcome,
     ) -> Window<'a> {
         let screen = win32::screen_size();
-        let form = if text == config::TEMPLATE {
-            Form::first_run(screen)
-        } else {
-            Form::new(&config::Settings::parse_file(&text).0, screen)
-        };
+        let form = Form::from_file(saved.as_deref(), screen);
+        let text = saved.unwrap_or_else(|| config::TEMPLATE.to_string());
         let check = check_game(&form.game);
         Window {
             checked: form.game.clone(),
