@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Polish menus work.** Polish needs the registry's `sku` set to `polish`;
+  the launcher wrote `Europe`, so `language = Polish` showed English menus
+  (seen in the game). Choosing another language sets `Europe` again; with
+  no language set, your own `sku` is kept.
 - Updated rea-launcher-sdk to v0.3.2.
 - Options also take `--flag=value` (`--vsync=on`), and a flag spelled with
   an underscore works too (`--stutter_fix off`, `--frame_limit 60`), as

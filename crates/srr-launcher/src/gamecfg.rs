@@ -252,8 +252,14 @@ pub struct RegValue {
 /// Registry values the game reads before it will start. `installdir` is
 /// the private runtime copy, with the trailing backslash of the original
 /// `SEGA Rally.reg`. `language` is written when the option is set; unset,
-/// English is only a default for a missing value.
+/// English is only a default for a missing value. `sku` follows the
+/// language: the Polish menus need `polish` (the full rip's readme; with
+/// `Europe` the game shows English), every other language `Europe`.
 pub fn registry_values(runtime_windows_path: &str, language: Option<&str>) -> Vec<RegValue> {
+    let sku = match language {
+        Some(language) if language.eq_ignore_ascii_case("Polish") => "polish",
+        _ => "Europe",
+    };
     vec![
         RegValue {
             name: "installdir",
@@ -262,8 +268,8 @@ pub fn registry_values(runtime_windows_path: &str, language: Option<&str>) -> Ve
         },
         RegValue {
             name: "sku",
-            value: "Europe".to_string(),
-            if_missing: false,
+            value: sku.to_string(),
+            if_missing: language.is_none(),
         },
         RegValue {
             name: "language",
@@ -544,6 +550,34 @@ mod tests {
         assert_eq!(
             dxvk_conf(None),
             "# no frame limit (managed by SRRLauncher)\n"
+        );
+    }
+
+    #[test]
+    fn polish_menus_need_the_polish_sku() {
+        // The full rip's readme: Polish shows only with sku "polish";
+        // with "Europe" the game falls back to English (seen in the game,
+        // 2026-11-02).
+        let polish = registry_values(r"C:\x", Some("Polish"));
+        assert_eq!(
+            polish[1],
+            RegValue {
+                name: "sku",
+                value: "polish".into(),
+                if_missing: false
+            }
+        );
+        // Another language set: back to the European build.
+        let german = registry_values(r"C:\x", Some("German"));
+        assert_eq!(
+            (german[1].value.as_str(), german[1].if_missing),
+            ("Europe", false)
+        );
+        // Unset: the player's own sku (and language) stay.
+        let unset = registry_values(r"C:\x", None);
+        assert_eq!(
+            (unset[1].value.as_str(), unset[1].if_missing),
+            ("Europe", true)
         );
     }
 

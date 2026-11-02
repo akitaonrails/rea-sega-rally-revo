@@ -58,7 +58,7 @@ SEGA Rally_SSE1.exe: pacer
 
 ## registry (HKLM\SOFTWARE\Sega\SEGA Rally, 32-bit view)
 installdir = "C:\\users\\steamuser\\AppData\\Local\\SRRLauncher\\SegaRally\\"
-sku = "Europe"
+sku = "Europe" (only when missing)
 language = "English" (only when missing)
 
 ## dxvk.conf
