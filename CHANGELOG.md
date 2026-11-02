@@ -39,6 +39,12 @@
 - Syncing the game folder never overwrites the launcher's own runtime
   files: a `d3d9.dll` or `dxvk.conf` in the game folder (not part of the
   v4.0.6.0 game) is no longer copied over the installed DXVK.
+- With the bundled DXVK (srr-play, AppImage) the game starts with
+  `WINEDLLOVERRIDES` carrying `d3d9=n,b` first, so a `d3d9=b` elsewhere in
+  the environment cannot swap DXVK for Wine's own d3d9; every other rule
+  you set is kept. Wine is also recognised from `WINEPREFIX`,
+  `WINELOADER` or `STEAM_COMPAT_DATA_PATH` when a Wine build hides
+  `wine_get_version`.
 
 ## v0.1.1 - 2026-11-02
 

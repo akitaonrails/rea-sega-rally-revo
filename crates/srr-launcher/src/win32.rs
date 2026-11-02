@@ -155,10 +155,16 @@ pub fn pick_folder(title: &str) -> Option<std::path::PathBuf> {
 }
 
 pub fn is_wine() -> bool {
-    unsafe {
+    // Some Wine builds hide `wine_get_version`, so also accept the
+    // environment srr-play, the AppImage and Proton always set.
+    let exported = unsafe {
         let ntdll = GetModuleHandleW(wide("ntdll.dll").as_ptr());
         !ntdll.is_null() && GetProcAddress(ntdll, c"wine_get_version".as_ptr().cast()).is_some()
-    }
+    };
+    exported
+        || ["WINEPREFIX", "WINELOADER", "STEAM_COMPAT_DATA_PATH"]
+            .into_iter()
+            .any(|name| std::env::var_os(name).is_some())
 }
 
 struct Key(HKEY);

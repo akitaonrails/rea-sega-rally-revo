@@ -156,6 +156,40 @@ pub fn dxvk_conf(limit: Option<u32>) -> String {
     }
 }
 
+/// The Wine DLL rule the game needs when the launcher installed DXVK's
+/// `d3d9.dll` next to it: native first, so neither Wine's builtin d3d9 nor a
+/// stray `d3d9=b` in the environment replaces DXVK.
+pub const DXVK_OVERRIDE: &str = "d3d9=n,b";
+
+/// `WINEDLLOVERRIDES` for the game: our `d3d9` rule first when DXVK is
+/// installed, every unrelated rule the caller set kept (the AppImage's
+/// `mscoree,mshtml=` among them), and only the `d3d9` names we own
+/// replaced. Without DXVK the caller's value is passed through unchanged.
+pub fn wine_overrides(existing: Option<&str>, dxvk: bool) -> Option<String> {
+    if !dxvk {
+        return existing.map(str::to_string);
+    }
+    let mut result = vec![DXVK_OVERRIDE.to_string()];
+    for rule in existing.into_iter().flat_map(|rules| rules.split(';')) {
+        if rule.trim().is_empty() {
+            continue;
+        }
+        let Some((names, action)) = rule.split_once('=') else {
+            result.push(rule.to_string());
+            continue;
+        };
+        let kept: Vec<&str> = names
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty() && !name.eq_ignore_ascii_case("d3d9"))
+            .collect();
+        if !kept.is_empty() {
+            result.push(format!("{}={action}", kept.join(",")));
+        }
+    }
+    Some(result.join(";"))
+}
+
 /// Registry values the game reads before it will start. `installdir` is
 /// the private runtime copy, with the trailing backslash of the original
 /// `SEGA Rally.reg`.
@@ -313,6 +347,25 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn wine_overrides_put_dxvk_first_and_keep_unrelated_rules() {
+        assert_eq!(wine_overrides(None, true).as_deref(), Some("d3d9=n,b"));
+        assert_eq!(
+            wine_overrides(Some("mscoree,mshtml="), true).as_deref(),
+            Some("d3d9=n,b;mscoree,mshtml=")
+        );
+        assert_eq!(
+            wine_overrides(Some("d3d8,D3D9=b;dsound=n;;winemenubuilder.exe=d"), true).as_deref(),
+            Some("d3d9=n,b;d3d8=b;dsound=n;winemenubuilder.exe=d")
+        );
+        // no DXVK of ours: the caller's value is left exactly as it was
+        assert_eq!(wine_overrides(None, false), None);
+        assert_eq!(
+            wine_overrides(Some("d3d9=b"), false).as_deref(),
+            Some("d3d9=b")
+        );
     }
 
     #[test]

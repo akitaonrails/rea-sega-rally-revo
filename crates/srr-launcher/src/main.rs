@@ -504,6 +504,15 @@ mod app {
         } else {
             Command::new(&runtime_exe)
         };
+        // Under Wine, make sure the DXVK d3d9.dll installed above is the one
+        // loaded (the isolated desktop's explorer passes this on).
+        if wine || linux {
+            let existing = std::env::var("WINEDLLOVERRIDES").ok();
+            if let Some(overrides) = gamecfg::wine_overrides(existing.as_deref(), linux) {
+                log_line(&format!("wine: DLL overrides {overrides}"));
+                command.env("WINEDLLOVERRIDES", overrides);
+            }
+        }
         let status = command
             .current_dir(&runtime_dir)
             .status()

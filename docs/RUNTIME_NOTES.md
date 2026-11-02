@@ -179,3 +179,7 @@ was exercised against the real game yet:
   hashes to `4c08c1de…f1ad08f2520`. Rerun `SRR_GAME_DIR=... cargo test
   real_game -- --ignored` (it now goes through `pacer_verified`) and one
   fresh-runtime launch with the stutter fix on.
+- **WINEDLLOVERRIDES `d3d9=n,b`** is now passed to the game (through the
+  isolated desktop's explorer). Check in `launcher.log` and DXVK's log that
+  DXVK 3.1.1 still loads and picks the dGPU through srr-play and the
+  AppImage.
