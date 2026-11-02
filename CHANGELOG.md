@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Updated rea-launcher-sdk to v0.3.0.
+- Updated rea-launcher-sdk to v0.3.2.
 - **One launcher at a time.** Starting the launcher again while its window
   is open brings that window forward. While the game is running from it,
   a second start says so and doesn't start another game (exit code 5).
