@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Docs: the README covers the v0.2 options (one table for window, file and
+  command line), the DirectX 9 download instead of winetricks, an
+  Uninstall section that says where saves live and to back them up first
+  (the old "Start over" deleted the Wine prefix with them), Building with
+  the Wine tests, deny and the golden snapshots, Contributing (game
+  issues here, shared code at rea-launcher-sdk) and Credits.
+  `AGENTS.md` points to the SDK's standards and playbooks and records the
+  owner's decisions; `docs/RESEARCH.md` records the community fixes'
+  licences, the DirectX licence evidence, the trouble spots and the
+  platform matrix; `docs/CONTRIBUTIONS.md` carries the drafts for
+  PCGamingWiki and upstream.
 - Packaging: DXVK and its licence are pins in `packaging/third-party.txt`
   (SDK `pins.sh`), with this repository's `thirdparty` release as the
   fallback; `.github/workflows/mirror.yml` fills that release.

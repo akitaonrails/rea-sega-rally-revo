@@ -52,10 +52,12 @@ From the `distrobox-gaming` install history (2026-05-01 through 2026-08-21):
 4. **Offline DirectX runtime needed.** The repeatable main-menu access
    violation was stopped by installing the June 2010 DirectX redist plus
    `d3dx9`, `directplay` into the prefix (the rip ships only
-   `dxwebsetup.exe`). *Wired by:* `srr-play` runs
-   `winetricks d3dx9 directplay d3dcompiler_47` once per prefix when
-   winetricks is available (DXVK issue #3320 also names d3dcompiler_47 as
-   a crash-stopper); documented fallback otherwise.
+   `dxwebsetup.exe`). *Since 2026-11-02:* the owner's first AppImage run
+   and the recorded race used a fresh prefix **without** winetricks, so
+   Wine 11.20's built-in d3dx9/dplayx sufficed there; the old crash may
+   have come from the then-missing saved-game layout (#3). *Wired by:* a
+   Download button for Microsoft's D3DX9 files (see "DirectX 9 files"),
+   which Windows 10/11 need; `srr-play`'s winetricks step is gone.
 5. **Startup looks stuck on the logo videos.** Wine's Quartz/GStreamer
    path spends a long time on `Bootup/video/Rally/SEGA_Logo720p.wmv` and
    `SRS_Logo_1.wmv`. *Wired by:* renamed out of the way in the runtime
@@ -137,12 +139,19 @@ not applicable to ours; not shipped.
 - The game's renderer carries aspect tables in `.rdata`: two layouts
   flanking the 16:9 constant `39 8E E3 3F` (1.7777778f32) with 4:3
   (`ab aa aa 3f`) and 16:10 (`cd cc cc 3f`). In our builds the tables sit
-  at file offsets `0x2F7C44`/`0x2FADA8` (SSE1) and `0x2F4BF4`/`0x2F7D68`
-  (main) — PCGamingWiki's fixed offsets belong to a different build, so
-  this launcher locates them by layout pattern instead of offset.
-- 16:9 and 16:10 are native. 21:9 (64:27) and 32:9 replace the 16:9 slot
-  in both tables (`patches::aspect`), the same technique as the
-  PCGamingWiki/WSGF hex edit but computed from the chosen ratio.
+  at file offsets `0x2F7C44`/`0x2FADA8` (SSE1, clean and stutter-fixed)
+  and `0x2F4BF4`/`0x2F7D68` (NoDVD main) — PCGamingWiki's fixed offsets
+  belong to a different build. Until v0.1.x the launcher found them by
+  that layout pattern in any executable; since v0.2 they are exact
+  `PatchSet` sites per build (`patches::ASPECT_*`), so an unknown build is
+  never touched.
+- 16:9 and 16:10 are native: the game picks between them from the
+  resolution, so the old 16:9/16:10 chips changed nothing (owner decision
+  2026-11-02: folded into the resolution). 21:9 (64:27, `26 B4 17 40`) and
+  32:9 (`39 8E 63 40`) replace the 16:9 slot in both tables when the
+  resolution is ultra-wide — the PCGamingWiki/WSGF hex edit.
+- **Not verified**: no 21:9 or 32:9 screen has been tried
+  (`docs/RUNTIME_NOTES.md`).
 
 ## Frame limiting
 
@@ -167,6 +176,82 @@ its key list confirms the config.ini schema (including `RefreshRate`,
 Anti-aliasing stays off (`AntiAliasingLevel=0`), matching the proven
 configuration; multisample stability under DXVK is untested.
 
+## Community fixes: licence and maintenance
+
+| Project | What it fixes | Licence | Maintained | Decision |
+| --- | --- | --- | --- | --- |
+| [stuken/SegaRallyRevoStutterFix](https://github.com/stuken/SegaRallyRevoStutterFix) | both stutter bugs, clean SSE1 v4.0.6.0 only (`patch.py`) | **none** (no licence file; README and `patch.py` state no terms; checked 2026-11-02) | yes (last push 2026-09-12) | reimplemented as `patches::PACER`; its cave machine code equals the fix's output. **Owner to decide** whether to ask stuken for a licence or permission (draft U1 in `docs/CONTRIBUTIONS.md`). |
+| [Martijnsx/Sega-Rally-Revo-Frame-Pacing-Fix](https://github.com/Martijnsx/Sega-Rally-Revo-Frame-Pacing-Fix) | timer initialisers 15,999 µs → 0 (P1), HTML/Python patcher | **none** (no licence file, checked 2026-11-02) | yes (last push 2026-10-21) | not used: another build (3,700,786 bytes). Nothing taken from it. |
+| DXVK (`d3d9.maxFrameRate`) | Linux/Wine renderer, frame limiter | Zlib | yes | bundled (pinned, mirrored) |
+| Widescreen Fixer / WSGF hex edit | ultra-wide aspect | WSGF technique (no code) | — | technique reused at our builds' offsets |
+
+## DirectX 9 files: licence evidence (2026-11-02)
+
+The game links one of Microsoft's D3DX9 DLLs (`d3dx9_NN.dll`, part of the
+DirectX "optional components"); Windows 10/11 do not include them, and
+Windows Update never installs them.
+
+- **The only package with these DLLs** is Microsoft's DirectX End-User
+  Runtime (`directx_Jun2010_redist.exe`, today served re-signed:
+  100,275,120 bytes, SHA-256 `053f76dc…dbf89c73b`; winetricks still pins
+  the older signature `8746ee1a…f011780c0d`). Its licence text (in its
+  `dsetup32.dll`, shown at install) — *Microsoft Software License Terms,
+  Microsoft DirectX End User Runtime* — grants "install and use any number
+  of copies … on your devices" and forbids to "publish the software for
+  others to copy" and to "transfer the software … to any third party".
+  So we cannot extract its DLLs at package time and ship them.
+- **The DirectX SDK's REDIST.TXT** lists `D3DX9_xx.dll` as redistributable,
+  but only to SDK licensees and, per Microsoft's own deployment guidance,
+  through DirectSetup: "Using the legacy DirectX SDK requires the use of
+  the deprecated DirectSetup for components such as D3DX9…"
+  ([DirectX Installation for Game Developers](https://learn.microsoft.com/en-us/windows/win32/dxtecharts/directx-setup-for-game-developers)).
+  The project has not accepted the SDK licence, and DirectSetup writes to
+  System32 (admin rights). The one app-local D3DX Microsoft licenses,
+  the `Microsoft.DXSDK.D3DX` NuGet package, holds only `d3dx9_43.dll`,
+  which a 2007 game does not load.
+- **Decision**: the window's Download button (and `--download-directx`)
+  fetches the runtime package from download.microsoft.com on the
+  player's request, pinned by SHA-256; the player's own launcher takes the
+  32-bit `d3dx9_24…43.dll` and `D3DCompiler_*.dll` out of its cabinets
+  (the `cab` crate) and puts them next to the game in the private copy
+  (no admin, nothing in System32), with `n,b` Wine overrides. Which
+  `d3dx9_NN` the game imports was not checked (no executable on the
+  analysis host); all versions are extracted (~70 MB).
+- **DirectPlay** is not in that package (winetricks takes it from the
+  February 2010 package's `dxnt.cab`); on Windows it is an optional Windows
+  feature, and it is COM-registered, so it cannot sit in the game folder.
+  Wine ships built-in `dplayx`/`dpnet`, and the runs without winetricks
+  reached the menus and a race; no multiplayer was tried. Nothing is
+  wired for it; Windows offers to enable it if the game asks.
+- `d3dcompiler_47` (winetricks' third verb) was a DXVK safeguard from DXVK
+  issue #3320 (falling trees, fixed by 2023 drivers); not needed for d3d9.
+
+## Old-game trouble spots
+
+| Spot | Status for this game |
+| --- | --- |
+| Timers / frame pacing on fast CPUs | the two stacked stutter bugs above; stutter fix + DXVK limit |
+| Multi-core affinity | no problem seen on a 16-core 7950X3D |
+| DirectSound3D / EAX | not analysed; sound worked under Wine in the recorded race; native Windows not tried |
+| CD audio | none (music is on disk) |
+| Intro-video codecs | the two WMV logo videos stall Wine's GStreamer path; switched off in the private copy |
+| Resolution and aspect tables | any resolution via config.ini; ultra-wide via the aspect sets |
+| Window losing focus | exclusive fullscreen; under Wine the isolated desktop keeps it contained; not tested on native Windows |
+| Disc check | the SSE1 build avoids it (PCGamingWiki); the NoDVD main build is a supported edition (owner decision) |
+
+## Platforms
+
+| Platform | Status |
+| --- | --- |
+| Linux AppImage, 4K desktop (Hyprland, RTX 5090) | verified: menus, a full race with a pad (owner's recording) |
+| Headless gamescope 4K | verified: title, attract demo, quality presets |
+| Steam Deck Game Mode (1280×800, controller, suspend/resume) | **not verified** |
+| Steam Proton running `SRRLauncher.exe` directly | **not verified** (frame limit through Proton's DXVK) |
+| Native Windows 10/11 | **not verified** (DirectX Download path, VirtualStore registry) |
+| Multi-monitor | the isolated Wine desktop exists for it (verified 2026-08-21 in distrobox-gaming); native Windows not tried |
+| HiDPI / 4K | verified on Linux; Wine DPI 144/192 window fit unit-tested only |
+| Ultra-wide 21:9 / 32:9 | **not verified** |
+
 ## Known-but-not-shipped
 
 - Widescreen Fixer (aspect on the fly), the Martijnsx P1 patch (different
@@ -183,8 +268,14 @@ configuration; multisample stability under DXVK is untested.
   controller policy), `ansible/group_vars/all/pc_racing.yml`
   (`sega-rally-revo` entry), git commits `625520d`, `736bd9a`, `961dd56`,
   `6fa10f6`, `d3acc46`, `8875b85`; `docs/pc-racing-launcher-opportunities.md`
-- stuken/SegaRallyRevoStutterFix (README + patch.py, fetched 2026-11-01)
-- Martijnsx/Sega-Rally-Revo-Frame-Pacing-Fix (README, fetched 2026-11-01)
+- stuken/SegaRallyRevoStutterFix (README + patch.py, fetched 2026-11-01;
+  licence and activity checked 2026-11-02 via the GitHub API)
+- Martijnsx/Sega-Rally-Revo-Frame-Pacing-Fix (README, fetched 2026-11-01;
+  checked 2026-11-02)
+- Microsoft: the DirectX End User Runtime licence (inside
+  `directx_Jun2010_redist.exe`), "DirectX Installation for Game
+  Developers" (learn.microsoft.com), Chuck Walbourn's "Not So Direct
+  Setup" (walbourn.github.io)
 - PCGamingWiki "Sega Rally Revo" + its Talk page; WSGF "Sega Rally Revo"
 - Lutris installer `sega-rally-revo-myabandonware-full-r`
 - doitsujin/dxvk issue #3320 (D3DX9 falling trees, d3dcompiler_47)

@@ -5,6 +5,9 @@ Linux, at 4K, without the stutter. Point the launcher at the game folder and
 press **Play**: it builds a private, fixed-up copy of the game and starts it.
 Your installed game folder is never changed.
 
+Built on [rea-launcher-sdk](https://github.com/akitaonrails/rea-launcher-sdk),
+the shared kit of the rea launchers.
+
 ![The launcher's Play tab](docs/images/launcher-play.png)
 
 ### See it running
@@ -28,7 +31,8 @@ them for you.
 | Exclusive fullscreen crashes on multi-monitor and high-refresh Linux desktops | Runs the game inside an isolated Wine desktop at the chosen resolution |
 | Uneven frame pacing | DXVK frame limit: 60 fps by default, 120 or off for high-refresh screens |
 | Startup stalls on the logo videos under Wine | Switches the two logo videos off in the private copy |
-| Ultra-wide monitors get a stretched picture | Patches 21:9 and 32:9 into the game's aspect tables |
+| Ultra-wide monitors get a stretched picture | Picks the 21:9 or 32:9 aspect fix from the resolution (not yet checked on a real ultra-wide screen) |
+| Windows 10/11 lack the DirectX 9 files the game was built with | One **Download** button fetches them from Microsoft into the private copy |
 | DXVK picks the integrated GPU on hybrid laptops and desktops (black screen) | Pins the discrete GPU's Vulkan driver |
 | Community fixes overwrite your install | Everything happens in a private copy; the source folder is only read |
 
@@ -42,6 +46,11 @@ refuses anything else instead of patching it blindly:
 | --- | --- | --- |
 | `SEGA Rally_SSE1.exe` (clean) | `22655a54bad6932239ade58325703bd4b5a2020376737748026443fa5aadf76e` | the default; the stutter fix applies only to this build |
 | `SEGA Rally.exe` (no-DVD build in common copies) | `ad84ecea6ac5e86e1f1a420f07595866429bba63e7c489b40661a8032ba391d7` | played when the stutter fix is off or unavailable |
+
+Another build is refused with its SHA-256 and a link to report it
+([test report](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=test-report.yml),
+with `launcher.log` attached). The retail DVD's own `SEGA Rally.exe` is not
+in the table yet: we have no verified hash for it.
 
 ## Install
 
@@ -76,31 +85,33 @@ version; the frame limit then goes through Proton's own DXVK.
    game (about 4.2 GB) into the private folder; later launches copy only
    files that changed.
 
-On Linux, keep `winetricks` installed if you can: on the first run the
-launcher uses it to add `d3dx9`, `directplay` and `d3dcompiler_47`, which
-stops a known crash at the main menu. Without it the launcher prints a note
-and carries on.
+On **Windows**, press **Download** under *Microsoft DirectX 9 files* on the
+Play tab once (100 MB from Microsoft): Windows 10 and 11 don't include the
+DirectX 9 extension files the game was built with. On Linux the game runs
+without them; the button is there if the game crashes at the main menu.
+Nothing is downloaded unless you press it.
 
 ## The settings window
 
 ### Play
 
-Game folder, the Look presets, the stutter fix, the frame limit, and the menu
-language (screenshot at the top).
+Game folder, the Look presets, the stutter fix, the frame limit, the menu
+language and the DirectX 9 download (screenshot at the top).
 
-| Look | Resolution | Aspect | Quality | Vsync |
-| --- | --- | --- | --- | --- |
-| **Modern** (default) | your screen | from the screen | High | on |
-| **Steam Deck** (default on a Deck) | 1280×800 | 16:10 | High | on |
-| **Original 2007** | 1280×720 | 16:9 | Normal | on |
-| **Custom** | whatever you set on the Picture tab | | | |
+| Look | Resolution | Quality | Vsync |
+| --- | --- | --- | --- |
+| **Modern** (default) | your screen | High | on |
+| **Steam Deck** (default on a Deck) | 1280×800 | High | on |
+| **Original 2007** | 1280×720 | Normal | on |
+| **Custom** | whatever you set on the Picture tab | | |
 
 ### Picture
 
 ![The Picture tab](docs/images/launcher-picture.png)
 
-Resolution, aspect, quality and vsync. Changing any of them turns the Look
-into Custom.
+Resolution (with the size and aspect the game will run at), quality and
+vsync. Changing any of them turns the Look into Custom. The screenshot
+predates v0.2: the aspect row is gone, the aspect follows the resolution.
 
 ### Controls
 
@@ -117,26 +128,33 @@ focused setting, **LB/RB** to switch tabs, **Start** to play.
 
 ## All options
 
-Every setting is in the window, in `launcher.cfg`, and on the command line.
+Every setting is in the window, in `launcher.cfg`, and on the command line
+(one table in the code, `config::OPTIONS`, generates all three).
 
 | Setting | Values | Default | `launcher.cfg` key | Command line |
 | --- | --- | --- | --- | --- |
 | Game folder | a folder | (asked on first run) | `game` | `--game <folder>` |
 | Private copy | a folder outside the game folder | `%LOCALAPPDATA%\SRRLauncher\SegaRally` | `runtime` | `--runtime <folder>` |
-| Resolution | Auto, your screen, 1080p, 1440p, 4K, or any `WxH` | Auto (screen size, or 1920×1080) | `resolution` | `--resolution 3840x2160` |
-| Aspect | Auto, 16:9, 16:10, 21:9, 32:9 | Auto (from the resolution) | `aspect` | `--aspect 21:9` |
-| Quality | Normal, High, Ultra | High | `quality` | `--quality high` |
+| Look | modern, steam-deck, original, custom | the recommended look | `look` | `--look original` |
+| Resolution | auto, your screen, 1080p, 1440p, 4K, or any `WxH` | auto (screen size, or 1920×1080) | `resolution` | `--resolution 3840x2160` |
+| Quality | normal, high, ultra | high | `quality` | `--quality high` |
 | Vsync | on, off | on | `vsync` | `--vsync on` |
-| Stutter fix | on, off | on | `stutter-fix` | `--stutter-fix on` |
-| Frame limit | 60, 120, off | 60 | `frame-limit` | `--frame-limit 60` |
+| Stutter fix | on, off | on | `stutter_fix` | `--stutter-fix on` |
+| Frame limit | 60, 120, off | 60 | `frame_limit` | `--frame-limit 60` |
 | Menu language | English, French, German, Spanish, Italian, Polish | English | `language` | `--language French` |
+| DirectX 9 files | Download / Remove button | not downloaded | — | `--download-directx` |
 
 Notes:
 
-- **Auto** resolution and aspect are resolved when you press Play, and the
-  actual values are saved.
-- **Aspect:** 21:9 and 32:9 patch the private copy's aspect tables. 16:9 and
-  16:10 need no patch; the game picks between them from the resolution.
+- **Unset keys** keep the game's own value: once `config.ini` exists, the
+  launcher writes only the keys of options set in `launcher.cfg`, so a
+  choice made in the game's menu stays. The window saves every value when
+  you press Play (auto resolution as the size it stands for).
+- **Look on the command line** sets that look's resolution, quality and
+  vsync for one run; other options on the same command line still win.
+- **Aspect** follows the resolution: 16:9 and 16:10 are the game's own;
+  ultra-wide sizes (21:9 such as 2560×1080 or 3440×1440, 32:9 such as
+  5120×1440) get the aspect fix in the private copy.
 - **Quality** maps to the game's ten per-feature sliders (scale 0–3).
   *High* is the configuration proven on the reference 4K setup; *Normal*
   sets every slider to 2 and *Ultra* every slider to 3.
@@ -145,6 +163,8 @@ Notes:
   the buttons are disabled there.
 - **Stutter fix** needs the clean `SEGA Rally_SSE1.exe`. Without it the game
   runs unpatched from `SEGA Rally.exe`; your saved choice is kept for later.
+- Keys of earlier versions keep working: `frame-limit` and `stutter-fix`
+  are read (the window saves the new names), an `aspect` line is ignored.
 - The game always runs fullscreen. Under Wine that fullscreen is the isolated
   Wine desktop, which is a window of the chosen size on your desktop.
 - Championship mode caps itself at 62.5 fps inside the game; that cap cannot
@@ -155,27 +175,34 @@ Notes:
 ```text
 SRRLauncher [options]
 
-  --game <folder>       folder with SEGA Rally.exe or SEGA Rally_SSE1.exe (remembered)
-  --runtime <folder>    private writable game copy
-  --resolution <WxH>    e.g. 3840x2160
-  --aspect <ratio>      16:9, 16:10, 21:9 or 32:9
-  --quality <preset>    normal, high or ultra
-  --vsync on|off        wait for the display refresh
-  --frame-limit <fps>   60, 120 or off
-  --stutter-fix on|off  community pacer fix on the private copy
-  --language <name>     English, French, German, Spanish, Italian or Polish
-  --check               validate the game and exit
-  --setup               prepare the runtime and settings without playing
-  --no-window           play with saved settings, no launcher window
-  --settings            only show the settings window
-  --linux               running under srr-play/AppImage: install DXVK into the copy
-  --help                show this help
+  --game <folder>                                          Game folder
+  --runtime <folder>                                       Private copy
+  --look modern|steam-deck|original|custom                 Look
+  --resolution <WxH>                                       Resolution
+  --quality normal|high|ultra                              Quality
+  --vsync on|off                                           Vsync
+  --frame-limit 60|120|off                                 Frame limit
+  --stutter-fix on|off                                     Stutter fix
+  --language English|French|German|Spanish|Italian|Polish  Language
+  --check             check the game folder and exit (exit code 1 if it cannot play)
+  --setup             prepare the private copy and the game's settings, without playing
+  --download-directx  download Microsoft's DirectX 9 files into the private copy, then exit
+  --no-window         play with the saved settings, no launcher window
+  --settings          only show the settings window
+  --linux             running under srr-play or the AppImage: install DXVK into the copy
+  --help              show this help
+
+Options override launcher.cfg for one run; only --game is remembered.
 ```
 
 Without options the settings window opens. Options on the command line
 override `launcher.cfg` for that run only; only the game folder is saved
 (the window's **Play** button saves everything). Invalid values are
-rejected with an error.
+rejected with a message naming what the option takes. `--help`, `--check`
+and errors print to the terminal you started the launcher from (a message
+box when there is none); `--check` exits with 1 when the folder cannot be
+played. The game is fully playable without the window:
+`SRRLauncher --no-window` (or `srr-play --play`) uses the saved settings.
 
 The AppImage and `srr-play` add their own commands:
 
@@ -193,46 +220,109 @@ The AppImage and `srr-play` add their own commands:
 | Launcher settings | `%LOCALAPPDATA%\SRRLauncher\launcher.cfg` (or `launcher.cfg` next to the exe) | `~/.local/share/srr-launcher/prefix/drive_c/users/<you>/AppData/Local/SRRLauncher/launcher.cfg` |
 | Private game copy | `%LOCALAPPDATA%\SRRLauncher\SegaRally` | the same path inside that Wine prefix |
 | Saves and `config.ini` | `Documents\SEGA Rally\Saved Games` | `Documents` inside the prefix, which Wine usually links to your `~/Documents` |
+| DirectX 9 files (after Download) | `%LOCALAPPDATA%\SRRLauncher\directx` | the same path inside that Wine prefix |
 | Logs | `%LOCALAPPDATA%\SRRLauncher\launcher.log` | the same, plus `~/.config/srr-launcher/play.log` and `settings.log` |
 
 Saves (`SEGA Rally.dat`, `SR_RANKTABLES.DAT`) are created only when missing
 and never deleted. An existing `config.ini` keeps its `[Audio]` and
-`[GameController]` sections untouched; only the `[Graphics]` keys above are
-updated.
+`[GameController]` sections untouched; only the `[Graphics]` keys of the
+options set in `launcher.cfg` are updated.
 
 ## Troubleshooting
 
 - **"This launcher supports the Sega Rally Revo PC v4.0.6.0 build"**: the
   executables are not the supported ones. The message shows the SHA-256 the
-  launcher found.
+  launcher found; please report it with the test-report form so the
+  edition can be added.
 - **Black screen while the game seems to run** (hybrid-GPU Linux): check the
   `GPU:` line `srr-play` prints at startup; it should name the discrete GPU's
   Vulkan driver.
-- **Crash at the main menu on a new prefix**: install `winetricks`, delete
-  `~/.local/share/srr-launcher/prefix`, and start again.
+- **The game does not start on Windows ("d3dx9_… .dll was not found") or
+  crashes at the main menu**: press **Download** under *Microsoft DirectX 9
+  files* on the Play tab (or run `SRRLauncher --download-directx`), then
+  Play again.
 - **The pad does nothing in the game**: switch the pad to X-input mode, then
   bind it in the game's Controls menu.
-- **Start over**: delete `%LOCALAPPDATA%\SRRLauncher` (Windows) or
-  `~/.local/share/srr-launcher` and `~/.config/srr-launcher` (Linux). Your
-  game folder was never modified.
+
+## Uninstall
+
+Your game folder was never modified, so there is nothing to undo there.
+
+1. **Back up your saves first** if you want to keep them:
+   `Documents\SEGA Rally\Saved Games` (and `Public Documents\SEGA
+   Rally\Shared Data` for rank tables and ghosts). On Linux these live in
+   the Wine prefix's `drive_c/users/<you>/Documents` (often linked to your
+   own `~/Documents`) and `drive_c/users/Public/Documents`.
+2. Windows: delete `%LOCALAPPDATA%\SRRLauncher` (settings, private copy,
+   DirectX files, log) and the launcher's folder. The registry key
+   `HKLM\SOFTWARE\WOW6432Node\Sega\SEGA Rally` (or its VirtualStore twin
+   under HKCU) can go too.
+3. Linux: delete the AppImage or zip, `~/.config/srr-launcher`, and
+   `~/.local/share/srr-launcher` — **this holds the Wine prefix, so your
+   saves are inside it unless Wine linked Documents to your home folder.**
+   Back them up first.
 
 ## Building
 
 ```sh
-cargo test --workspace                                 # host tests
+cargo fmt --all --check
+cargo test --workspace                                 # host tests, incl. the headless window tests
 for t in linux/tests/*.sh; do sh "$t"; done            # Linux helper tests
-cargo clippy --release --target i686-pc-windows-gnu -- -D warnings
-cargo build --release --target i686-pc-windows-gnu     # needs i686 mingw-w64 and lld
+cargo clippy --release --target i686-pc-windows-gnu --workspace -- -D warnings
+cargo deny check
+cargo build --release --locked --target i686-pc-windows-gnu   # needs i686 mingw-w64 and lld
+sdk/scripts/wine-test --locked --workspace             # the Windows-target tests under Wine, headless
 sh packaging/package.sh <version> dist target/i686-pc-windows-gnu/release   # zip + AppImage
 ```
 
-CI (`.github/workflows/build.yml`) runs all of this on every push, checks
-that every import of the built exe resolves, uploads the Windows zip and the
-AppImage, and publishes both as a GitHub Release for `v*` tags.
+`crates/srr-launcher/tests/snapshots/` holds golden snapshots of `--help`,
+the `launcher.cfg` template and what each look and a few option
+combinations write. A changed snapshot must match an intended change;
+regenerate with `SRR_UPDATE_SNAPSHOTS=1 cargo test --test snapshots` and
+review every diff. The real game is only used by the env-gated
+`SRR_GAME_DIR=… cargo test real_game -- --ignored`.
 
-Further reading: [docs/RESEARCH.md](docs/RESEARCH.md) (the fixes and the
-evidence behind them) and [docs/RUNTIME_NOTES.md](docs/RUNTIME_NOTES.md)
-(what was verified on real hardware, and what was not).
+CI (`.github/workflows/build.yml`, the SDK's reusable `launcher-ci` and
+`launcher-release`) runs all of this on every push, including the
+Windows-target tests under Wine, checks that every import of the built exe
+resolves, uploads the Windows zip and the AppImage, and publishes both as a
+GitHub Release for `v*` tags. `mirror.yml` copies the pinned DXVK into the
+`thirdparty` release, the pins' fallback.
+
+Further reading: [docs/RESEARCH.md](docs/RESEARCH.md) (the fixes, the
+community work and the evidence behind them) and
+[docs/RUNTIME_NOTES.md](docs/RUNTIME_NOTES.md) (what was verified on real
+hardware, and what was not).
+
+## Contributing
+
+- **Sega Rally Revo problems** (the game, its editions, its settings,
+  `srr-play`'s game choices, this README): issues and pull requests here.
+- **Shared code** — the private-copy engine, `launcher.cfg`/INI editing,
+  the settings window's widgets and theme, `rea-play.sh`, the packaging
+  scripts, the CI workflows, anything under `sdk/` — belongs to
+  [rea-launcher-sdk](https://github.com/akitaonrails/rea-launcher-sdk):
+  open the issue or pull request there. If a fix would touch a
+  `rea_launcher*` crate or a file in `sdk/`, it is shared code.
+- Never patch `sdk/` (it is vendored by the SDK's `scripts/sdk-sync` and CI
+  fails on drift) and never copy SDK code into this repository.
+- Test reports are welcome: use the
+  [test-report form](https://github.com/akitaonrails/rea-sega-rally-revo/issues/new?template=test-report.yml).
+
+## Credits
+
+- **stuken** — [SegaRallyRevoStutterFix](https://github.com/stuken/SegaRallyRevoStutterFix),
+  the stutter fix this launcher applies (reimplemented in Rust).
+- **DXVK** (Philip Rebohle and contributors) — Direct3D 9 on Vulkan for
+  Linux.
+- **Wine** and **Kron4ek's** Wine builds — the AppImage's Wine.
+- **AppImage** (appimagetool, type2 runtime).
+- PCGamingWiki and WSGF — the aspect-table technique; the Lutris installer
+  and NeoGAF's 2016 analysis of the frame pacing.
+- The Barlow typeface (Jeremy Tribby), SIL OFL.
+- [rea-launcher-sdk](https://github.com/akitaonrails/rea-launcher-sdk).
+
+See [THIRD_PARTY.md](THIRD_PARTY.md) for licences.
 
 ## Legal
 

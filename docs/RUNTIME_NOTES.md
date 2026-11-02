@@ -228,3 +228,43 @@ Not exercised: the settings window (no window was opened), a game
 session, `real_game` (no game folder on this host), and native Windows.
 Worth a look on the next real run: the new chip focus ring and d-pad
 stepping in the window, and the VirtualStore path on a non-admin Windows.
+
+## Unreleased — v0.2 pass on rea-launcher-sdk v0.2.0 (needs real-game checks)
+
+Verified (no game run, no window opened): host tests including the
+headless window tests (egui_kittest), the same tests under Wine with
+`sdk/scripts/wine-test` (i686), the golden snapshots, `cargo deny`, the
+sdk/ drift check, the shell tests, and a local `packaging/package.sh` run
+(zip within the allowlist, AppImage built). The DirectX download was
+tested against Microsoft's real package once by hand (hash pinned, the
+D3DX9 DLLs extracted with the `cab` crate) and with a fake server in the
+unit tests; not through the window.
+
+Pending, in the real game:
+
+- **Option values never seen in the game** (the window offers them):
+  21:9 and 32:9 aspect fixes (no ultra-wide screen), frame limit 120 and
+  off, vsync off, and the five non-English menu languages. Each needs one
+  run that shows the effect.
+- **config.ini written key by key.** Only the set options' keys are
+  written now; check a launch over a config.ini the game saved, that the
+  game still reads resolution/quality/vsync, and that unsetting an option
+  in launcher.cfg leaves the game's own value.
+- **Patches from the pristine exe every launch.** Rerun
+  `SRR_GAME_DIR=… cargo test real_game -- --ignored` (it now checks every
+  `PatchSet` through the SDK, incl. the result hash), then one launch with
+  the stutter fix on and one off, and one with an ultra-wide resolution.
+- **DirectX 9 files.** On native Windows 10/11 without the DirectX
+  runtime: does the game start only after Download? Which `d3dx9_NN.dll`
+  does it load (Process Monitor or `WINEDEBUG=+loaddll`)? Under Wine, a race
+  with the downloaded files (`n,b` overrides) and one without.
+- **DirectPlay**: not wired; check whether the menus touch it on native
+  Windows (Windows would offer the optional feature).
+- **No winetricks**: a new prefix through srr-play/the AppImage reaching a
+  race (the owner's earlier run suggests it does).
+- **--check / --help / errors in a terminal** on native Windows (console
+  attach) and under Wine.
+- **Settings window**: the regrouped Picture tab, the DirectX row on the
+  Play tab, the photo credit band, and the lighter control borders —
+  judge them in a deliberate window; `docs/images/launcher-picture.png`
+  still shows the old aspect row and should be recaptured.

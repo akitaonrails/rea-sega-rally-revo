@@ -10,6 +10,7 @@ Add a row before bundling anything new.
 | sha2 | MIT OR Apache-2.0 | crates.io |
 | eframe / egui (and dependencies) | MIT OR Apache-2.0 | crates.io |
 | jpeg-decoder | MIT OR Apache-2.0 | crates.io |
+| cab (and lzxd, flate2, byteorder, time) — reads Microsoft's DirectX package after the player downloads it | MIT (cab, lzxd); MIT OR Apache-2.0 (the others) | crates.io |
 | Rust standard library (pre-release) | MIT OR Apache-2.0 | rust-lang.org |
 | MinGW-w64 runtime | BSD-3-Clause and others | mingw-w64.org |
 
@@ -21,27 +22,43 @@ Add a row before bundling anything new.
 
 | Component | Licence | Source |
 | --- | --- | --- |
-| DXVK 3.1.1, 32-bit `d3d9.dll` | Zlib | github.com/doitsujin/dxvk (tarball and licence pinned by SHA-256 in `packaging/dxvk.txt`) |
+| DXVK 3.1.1, 32-bit `d3d9.dll` | Zlib | github.com/doitsujin/dxvk (tarball and licence pinned by SHA-256 in `packaging/third-party.txt`, mirrored in this repository's `thirdparty` release) |
 | Wine 11.20 (Kron4ek amd64-wow64 build of unmodified WineHQ sources) | LGPL-2.1+ | github.com/Kron4ek/Wine-Builds (pinned in the vendored SDK's `sdk/packaging/appimage/tools.pins`, with appimagetool and the runtime); licence and source notes inside the AppImage at `usr/share/doc/wine` |
 | AppImage runtime (appimagetool 1.9.1, type2 runtime 20251108) | MIT | github.com/AppImage/appimagetool, github.com/AppImage/type2-runtime |
 
 ## Artwork and fonts
 
-| Component | Licence | Source |
-| --- | --- | --- |
-| Window portrait | ours (AI-generated for this launcher; nothing taken from the game) | — |
-| App icon | ours (AI-generated for this launcher) | — |
-| Barlow, Barlow Condensed (window fonts, bundled by `rea-launcher-ui`) | SIL OFL 1.1 | google.com/fonts (licence file beside the fonts in the SDK's `crates/rea-launcher-ui/assets/fonts`) |
+| File | What | Author | Licence | Source |
+| --- | --- | --- | --- | --- |
+| `crates/srr-launcher/assets/portrait.jpg` | the settings window's art (560×650) | made for this launcher with an AI image tool; the tool and prompt were not recorded | ours, as stated since v0.1.0 (nothing taken from the game) — **provenance to be confirmed by the owner** | — |
+| `packaging/appimage/srr-launcher.png` | the app icon (256×256) | made for this launcher with an AI image tool; tool not recorded | ours, as above — **to be confirmed** | — |
+| `docs/images/launcher-*.png` | screenshots of the settings window | this project (captured headless) | MIT OR Apache-2.0, like the code | — |
+| README video and poster (hosted outside the repository) | gameplay recording through the launcher | the owner | the owner's | S3 links in the README |
+| Barlow, Barlow Condensed (window fonts, bundled by `rea-launcher-ui`) | fonts | Jeremy Tribby | SIL OFL 1.1 | google.com/fonts (licence file beside the fonts in the SDK's `crates/rea-launcher-ui/assets/fonts`) |
+
+## Downloaded on the player's request (never bundled)
+
+| Component | Licence | Source | Why not bundled |
+| --- | --- | --- | --- |
+| Microsoft DirectX End-User Runtime, June 2010 (`directx_Jun2010_redist.exe`, 100,275,120 bytes, SHA-256 `053f76dcbb28802e23341b6a787e3b0791c0fa5c8d4d011b1044172dbf89c73b`); the launcher keeps its 32-bit `d3dx9_*.dll` and `D3DCompiler_*.dll` | Microsoft Software License Terms, DirectX End User Runtime (shown by the package; it lets the player install and use it, and forbids publishing it for others to copy) | download.microsoft.com (pinned in `crates/srr-launcher/src/directx.rs`) | the runtime's licence forbids redistribution; the DirectX SDK's redistribution rights require Microsoft's DirectSetup installer (see `docs/RESEARCH.md`) |
+
+## Owner decisions
+
+- **2026-11-02 — NoDVD build supported.** The full rip's NoDVD
+  `SEGA Rally.exe` (SHA-256 `ad84ecea…2ba391d7`) is a supported edition;
+  the launcher never ships, writes or downloads a crack (see `AGENTS.md`).
+- **2026-11-02 — DirectX 9 files** are a download on request, not
+  winetricks and not bundled (above).
 
 ## Not bundled, but wired
 
-- The community pacer fix is **reimplemented in Rust from its public
-  description** (`patches::pacer`); no code or bytes from
-  stuken/SegaRallyRevoStutterFix are shipped. The game exes it patches
-  belong to the user's own copy.
-- `winetricks` verbs (`d3dx9`, `directplay`, `d3dcompiler_47`) are
-  installed into the private prefix only when the user already has
-  winetricks; the DirectX runtime itself is Microsoft's and never shipped.
+- The community stutter fix (stuken/SegaRallyRevoStutterFix) is
+  reimplemented as the `patches::PACER` table. Its three code caves are the
+  same machine code the fix's `patch.py` writes (about 130 bytes, pinned as
+  golden bytes); the fix's repository has **no licence file**, so whether
+  those bytes may be republished is an open question for the owner (a
+  request to the author is drafted in `docs/CONTRIBUTIONS.md`, U1). The
+  game executables it patches belong to the player's own copy.
 
 The launcher never bundles official game patches, cracks, or registry
 files from the rip; the registry values it writes are its own
