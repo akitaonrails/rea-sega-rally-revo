@@ -20,6 +20,10 @@
   End-User Runtime licence applies, with a link to Microsoft's page for
   the package. The launcher unpacks the files without running Microsoft's
   installer, which is where Microsoft shows that licence.
+- While the DirectX 9 files download or unpack, Play waits (the button
+  says why), and closing the window asks first: a second close cancels the
+  download, and the next one picks up where it stopped. Before, Play or
+  closing cut the download off half way.
 - **One launcher at a time.** Starting the launcher again while its window
   is open brings that window forward. While the game is running from it,
   a second start says so and doesn't start another game (exit code 5).

@@ -307,3 +307,68 @@ fn a_wrong_folder_says_how_to_fix_it() {
         &ui.get_by_role_and_label(Role::Button, "Play")
     ));
 }
+
+/// A download in progress, as the worker would report it.
+fn downloading(ui: &mut Harness<'static, Window>) -> Arc<Job> {
+    let job = Arc::new(Job::default());
+    job.set_phase(download::Phase::Downloading {
+        done: 10,
+        total: 100,
+    });
+    ui.state_mut().download = Some(job.clone());
+    ui.run();
+    job
+}
+
+#[test]
+fn play_waits_for_a_running_download_and_says_why() {
+    let (mut ui, _, dir) = open(None, true, "play-waits");
+    ready(&mut ui);
+    let job = downloading(&mut ui);
+    let play = ui.get_by_role_and_label(Role::Button, "Play");
+    assert!(testing::disabled(&play));
+    assert_eq!(
+        testing::description(&play).as_deref(),
+        Some(Window::PLAY_WAITS)
+    );
+    // Enter (or Start on a pad) does not slip past it either.
+    let ctx = ui.ctx.clone();
+    ui.state_mut().play(&ctx);
+    assert_eq!(*ui.state().outcome.lock().unwrap(), Outcome::Closed);
+    assert!(!dir.join("launcher.cfg").exists());
+    // Unpacking counts too; once done, Play is back.
+    job.set_phase(download::Phase::Unpacking { done: 1, total: 2 });
+    ui.run();
+    assert!(testing::disabled(
+        &ui.get_by_role_and_label(Role::Button, "Play")
+    ));
+    job.set_phase(download::Phase::Done(dir.join("directx")));
+    ui.run();
+    assert!(!testing::disabled(
+        &ui.get_by_role_and_label(Role::Button, "Play")
+    ));
+}
+
+#[test]
+fn closing_during_a_download_warns_then_cancels() {
+    let (mut ui, _, _) = open(None, true, "close-download");
+    // No download: the window closes at once.
+    assert!(ui.state_mut().close_requested());
+    let job = downloading(&mut ui);
+    // First close: held back, with a warning; the download goes on.
+    assert!(!ui.state_mut().close_requested());
+    ui.run();
+    assert!(ui.query_by_label(Window::CLOSE_HELD).is_some());
+    assert!(!job.cancelled());
+    // Second close: the download is cancelled and the window closes.
+    assert!(ui.state_mut().close_requested());
+    assert!(job.cancelled());
+    // A download that ended clears the warning.
+    let (mut ui, _, _) = open(None, true, "close-download-ends");
+    let job = downloading(&mut ui);
+    assert!(!ui.state_mut().close_requested());
+    job.set_phase(download::Phase::Failed("offline".into()));
+    ui.run();
+    assert!(ui.query_by_label(Window::CLOSE_HELD).is_none());
+    assert!(ui.state_mut().close_requested());
+}

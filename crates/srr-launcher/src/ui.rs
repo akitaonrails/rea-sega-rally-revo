@@ -119,6 +119,8 @@ pub struct Window {
     pad: PadNav,
     pending: Vec<Nav>,
     download: Option<Arc<Job>>,
+    /// A close was held back once because the download was running.
+    close_held: bool,
     pub outcome: Arc<Mutex<Outcome>>,
 }
 
@@ -142,6 +144,7 @@ impl Window {
             pad: PadNav::default(),
             pending: Vec::new(),
             download: None,
+            close_held: false,
             outcome: Arc::new(Mutex::new(Outcome::Closed)),
         }
     }
@@ -159,7 +162,44 @@ impl Window {
         }
     }
 
+    /// Why Play waits while the DirectX files download or unpack (closing the
+    /// window for the game would stop the worker half way).
+    pub const PLAY_WAITS: &'static str =
+        "Play waits until the DirectX 9 download finishes (or press Cancel).";
+
+    /// What the window says the first time it is closed during a download.
+    pub const CLOSE_HELD: &'static str = "The DirectX 9 download is still running. Close the \
+         window again to stop it; the next download picks up where it stopped.";
+
+    /// Whether the DirectX download (or its unpacking) is running.
+    fn downloading(&self) -> bool {
+        self.download
+            .as_ref()
+            .is_some_and(|job| job.phase().running())
+    }
+
+    /// The window was asked to close; true to let it. During a download the
+    /// first request is held back with a warning; the second cancels the
+    /// download (what was fetched stays for the next one) and closes.
+    pub fn close_requested(&mut self) -> bool {
+        if !self.downloading() {
+            return true;
+        }
+        if !self.close_held {
+            self.close_held = true;
+            self.error = Some(Self::CLOSE_HELD.to_string());
+            return false;
+        }
+        if let Some(job) = &self.download {
+            job.cancel();
+        }
+        true
+    }
+
     fn play(&mut self, ctx: &egui::Context) {
+        if self.downloading() {
+            return;
+        }
         if !self.ready() {
             self.tab = Tab::Play;
             return;
@@ -191,6 +231,13 @@ impl Window {
     /// The whole window.
     pub fn draw(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        if self.close_held && !self.downloading() {
+            // The download ended (or was cancelled): the warning is moot.
+            self.close_held = false;
+            if self.error.as_deref() == Some(Self::CLOSE_HELD) {
+                self.error = None;
+            }
+        }
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0.0, BLUE);
         let layout = Layout::new(full, PHOTO_W);
@@ -218,8 +265,13 @@ impl Window {
                 Tab::Controls => self.controls_tab(ui),
             });
         });
-        let hint = "The game folder is never changed. Settings are saved when you press Play.";
-        if widgets::footer(ui, layout.footer, hint, self.ready()).clicked() {
+        let downloading = self.downloading();
+        let hint = if downloading {
+            Self::PLAY_WAITS
+        } else {
+            "The game folder is never changed. Settings are saved when you press Play."
+        };
+        if widgets::footer(ui, layout.footer, hint, self.ready() && !downloading).clicked() {
             self.play(&ctx);
         }
         if ctx.input(|input| input.key_pressed(Key::Enter)) && !ctx.egui_wants_keyboard_input() {
@@ -284,6 +336,9 @@ impl Window {
     fn status(&self, ui: &mut egui::Ui) {
         let (text, color) = match (&self.error, &self.check) {
             (Some(error), _) => (error.clone(), ERROR),
+            (None, Check::Found { .. }) if self.downloading() => {
+                (Self::PLAY_WAITS.to_string(), MUTED)
+            }
             (None, Check::Found { .. }) => ("Ready. Press Play or Enter.".to_string(), MUTED),
             (None, _) => (
                 "First, show the launcher where the game is.".to_string(),
@@ -606,6 +661,12 @@ mod native {
         }
 
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+            if ui.ctx().input(|input| input.viewport().close_requested())
+                && !self.window.close_requested()
+            {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
             self.window.draw(ui);
             ui.ctx().request_repaint_after(Duration::from_millis(50));
         }
