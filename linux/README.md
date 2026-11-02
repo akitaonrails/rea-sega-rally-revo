@@ -23,7 +23,7 @@ game needs already wired:
 ```sh
 srr-play            # settings window, then play
 srr-play --play     # play with saved settings (no window); "start" works too
-srr-play stop       # end the game and the Wine server
+srr-play stop       # end this launch's session and the prefix's Wine server
 srr-play status     # running or idle
 ```
 
@@ -46,8 +46,13 @@ A GPU choice you already made (`VK_DRIVER_FILES`, `VK_ICD_FILENAMES`,
 | `SRR_SYSFS` | `/sys` | sysfs root (tests) |
 
 State lives in `~/.config/srr-launcher` (`running.pid`, `play.log`,
-`settings.log`, `inner.sh`). Run `sh linux/tests/gpu-env.sh` and
-`sh linux/tests/game-alive.sh` and `sh linux/tests/winebus.sh` to exercise the host-side helpers.
+`settings.log`, `inner.sh`). `running.pid` holds the session leader's pid
+and start time, so a reused pid or a game started some other way is never
+mistaken for this launch, and `stop` signals only that session's process
+group. The launcher path reaches `inner.sh` as an argument, never as
+generated shell text. Run `sh linux/tests/gpu-env.sh` and
+`sh linux/tests/game-alive.sh`, `sh linux/tests/winebus.sh` and
+`sh linux/tests/supervision.sh` to exercise the host-side helpers.
 
 ## Steam
 

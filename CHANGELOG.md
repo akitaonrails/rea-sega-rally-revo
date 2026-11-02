@@ -11,6 +11,12 @@
   leftover NVIDIA ICD but no NVIDIA GPU (that left DXVK with no device). It
   also finds ICDs in `/etc/vulkan/icd.d`, sets `VK_DRIVER_FILES` next to the
   deprecated `VK_ICD_FILENAMES`, and keeps a `VK_DRIVER_FILES` you set.
+- `srr-play` owns its game session: the lock records pid and start time
+  (a reused pid no longer reads as "already running"), `stop` signals only
+  that session's process group before shutting down the prefix's Wine
+  server, and a stray game process no longer blocks a start. The launcher
+  path is passed to the generated `inner.sh` as an argument, so a folder
+  name with a quote can no longer break or inject into it.
 
 ## v0.1.1 - 2026-11-02
 

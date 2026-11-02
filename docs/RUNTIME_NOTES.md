@@ -163,3 +163,7 @@ was exercised against the real game yet:
   `nvidia` module, and exports `VK_DRIVER_FILES`. On the reference host
   (RTX 5090 + iGPU) `srr-play` should still print the NVIDIA pin and DXVK
   should still pick the RTX 5090.
+- **srr-play supervision.** `srr-play --play` (detached) then `srr-play
+  status` / `srr-play stop` on a real game session, and the AppImage
+  (waiting mode) ending cleanly when the game exits or on Ctrl+C. Only
+  covered with fake runners and `sleep` (`linux/tests/supervision.sh`).

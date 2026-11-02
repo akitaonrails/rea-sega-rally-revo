@@ -44,10 +44,35 @@ GAME_ALIVE='game_alive() {
   return 1
 }'
 eval "$GAME_ALIVE"
-running() {
-  game_alive && return 0
-  [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK")" 2>/dev/null
+
+# Print session id and process start time from /proc. Text after the final
+# ") " avoids comm fields that contain spaces or parentheses.
+proc_stat() {
+  [ -r "/proc/$1/stat" ] || return 1
+  stat=$(cat "/proc/$1/stat") || return 1
+  rest=${stat##*) }
+  set -- $rest
+  [ "$#" -ge 20 ] || return 1
+  printf '%s %s\n' "$4" "${20}"
 }
+
+read_lock() {
+  [ -r "$LOCK" ] || return 1
+  IFS=' ' read -r LOCK_PID LOCK_START < "$LOCK" || return 1
+  case "$LOCK_PID" in ''|*[!0-9]*) return 1 ;; esac
+  case "$LOCK_START" in ''|*[!0-9]*) return 1 ;; esac
+}
+
+# A lock alone proves nothing: the pid must still be the same setsid session
+# leader with the same start time recorded when we spawned it, so a reused
+# pid or a game started some other way never counts as this launch.
+session_valid() {
+  read_lock || return 1
+  stats=$(proc_stat "$LOCK_PID") || return 1
+  [ "$stats" = "$LOCK_PID $LOCK_START" ]
+}
+
+running() { session_valid; }
 
 # Choose the Vulkan driver for DXVK on hybrid-GPU hosts. When an NVIDIA GPU
 # is present and its ICD coexists with another vendor's ICD, pin NVIDIA:
@@ -152,33 +177,71 @@ start() {
   fi
   bootstrap
   inner=$STATE/inner.sh
-  cat > "$inner" <<INNER
-#!/bin/sh
+  # The launcher is positional parameter 1, never shell source. After the
+  # launcher returns, wait for the game itself (the isolated Wine desktop
+  # can hand back early), then clean only our prefix.
+  {
+    echo '#!/bin/sh'
+    echo "$GAME_ALIVE"
+    cat <<'INNER'
 trap 'wineserver -k; exit' INT TERM HUP
-wine '$LAUNCHER' --no-window --linux
+wine "$1" --no-window --linux
 sleep 3
-$GAME_ALIVE
 while game_alive; do sleep 1; done
 wineserver -k
 INNER
+  } > "$inner"
   chmod +x "$inner"
   export SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS="${SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS:-1}"
   echo "starting (isolated Wine desktop, frame limit via DXVK)"
-  launch sh "$inner"
+  launch sh "$inner" "$LAUNCHER"
 }
 
-launch() {
-  if [ -n "${SRR_WAIT:-}" ]; then
-    $RUN env WINEPREFIX="$PREFIX" $GPU "$@" > "$STATE/play.log" 2>&1
-  else
-    setsid $RUN env WINEPREFIX="$PREFIX" $GPU "$@" > "$STATE/play.log" 2>&1 < /dev/null &
-    echo $! > "$LOCK"
+launch_interrupted() {
+  trap - EXIT HUP INT TERM
+  if session_valid; then
+    kill -TERM "-$LOCK_PID" 2>/dev/null || true
   fi
+  rm -f "$LOCK"
+  exit 143
+}
+
+# The child gets its own session (pid + start time in the lock) so stop can
+# address only this launch. SRR_WAIT (the AppImage) waits and cleans the
+# lock on natural exit or interruption; otherwise the game runs detached
+# and a stale lock is recognised by its start time.
+launch() {
+  setsid $RUN env WINEPREFIX="$PREFIX" ${GPU:-} "$@" > "$STATE/play.log" 2>&1 < /dev/null &
+  pid=$!
+  stats=$(proc_stat "$pid") || {
+    [ -n "${SRR_WAIT:-}" ] && { wait "$pid"; return "$?"; }
+    return 0
+  }
+  printf '%s %s\n' "$pid" "${stats#* }" > "$LOCK"
+  [ -n "${SRR_WAIT:-}" ] || return 0
+  trap 'rm -f "$LOCK"' EXIT
+  trap 'launch_interrupted' HUP INT TERM
+  wait "$pid"
+  rc=$?
+  rm -f "$LOCK"
+  trap - EXIT HUP INT TERM
+  return "$rc"
+}
+
+# Revalidate immediately before signaling: stale/reused pids and game
+# processes this script did not start are never targets. Then shut down
+# our private prefix's wineserver (nothing else uses it).
+stop_session() {
+  if session_valid; then
+    kill -TERM "-$LOCK_PID" 2>/dev/null || true
+  fi
+  rm -f "$LOCK"
+  $RUN env WINEPREFIX="$PREFIX" wineserver -k 2>/dev/null
 }
 
 settings() {
   bootstrap
-  $RUN env WINEPREFIX="$PREFIX" $GPU wine "$LAUNCHER" --settings --linux 2>"$STATE/settings.log"
+  prefix_wine "$LAUNCHER" --settings --linux 2>"$STATE/settings.log"
   rc=$?
   $RUN env WINEPREFIX="$PREFIX" wineserver -w 2>/dev/null
   case $rc in
@@ -204,9 +267,7 @@ case "${1:-}" in
     if running; then echo "already running"; else start; fi ;;
   status) if running; then echo running; else echo idle; fi ;;
   stop)
-    $RUN env WINEPREFIX="$PREFIX" wineserver -k 2>/dev/null
-    [ -f "$LOCK" ] && kill "$(cat "$LOCK")" 2>/dev/null
-    rm -f "$LOCK"
+    stop_session
     echo stopped ;;
   *) echo "usage: $0 [--play|stop|status]"; exit 2 ;;
 esac
