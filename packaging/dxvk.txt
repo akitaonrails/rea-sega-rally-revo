@@ -1,2 +1,5 @@
-# DXVK 3.1.1, Windows 32-bit d3d9.dll
+# DXVK 3.1.1, Windows 32-bit d3d9.dll. Line 1: release tarball; line 2: its
+# zlib licence at the v3.1.1 tag's commit (the tarball ships none). Each is
+# "url sha256"; CI derives the tarball's top folder from the file name.
 https://github.com/doitsujin/dxvk/releases/download/v3.1.1/dxvk-3.1.1.tar.gz 40565b4a724aadc4433fa4e010b4b23916d9b1f1baeee64e17186db94f54e608
+https://raw.githubusercontent.com/doitsujin/dxvk/b1a1c99ab52b687cf950d62c88bc2fa316b41663/LICENSE a5cb1a6ded7d2d7e92d550ba28edd21be2d1d4044662b399887351023e30ce64

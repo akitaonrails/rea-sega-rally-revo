@@ -29,7 +29,7 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Unit tests (host)
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Install dependency audit tools
         run: cargo install --locked cargo-audit cargo-deny
@@ -48,13 +48,13 @@ jobs:
         run: sh -n linux/srr-play packaging/appimage/AppRun packaging/appimage/build.sh
 
       - name: Lint (Windows target)
-        run: cargo clippy --release --target i686-pc-windows-gnu --workspace -- -D warnings
+        run: cargo clippy --release --target i686-pc-windows-gnu --workspace --locked -- -D warnings
 
       - name: Build SRRLauncher.exe
-        run: cargo build --release --target i686-pc-windows-gnu --workspace
+        run: cargo build --release --target i686-pc-windows-gnu --workspace --locked
 
       - name: Every import of SRRLauncher.exe is resolvable
-        run: SRR_LAUNCHER_EXE="$PWD/target/i686-pc-windows-gnu/release/SRRLauncher.exe" cargo test --test imports -- --ignored
+        run: SRR_LAUNCHER_EXE="$PWD/target/i686-pc-windows-gnu/release/SRRLauncher.exe" cargo test --locked --test imports -- --ignored
 
       - name: Package (including pinned DXVK)
         run: |
@@ -63,11 +63,13 @@ jobs:
           cp target/i686-pc-windows-gnu/release/SRRLauncher.exe \
              README.md THIRD_PARTY.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
           cp -r linux "dist/$name/linux"
-          read -r url digest < <(grep -v '^#' packaging/dxvk.txt)
+          { read -r url digest; read -r licence_url licence_digest; } < <(grep -v '^#' packaging/dxvk.txt)
           curl -fsSL "$url" -o dxvk.tar.gz
           echo "$digest  dxvk.tar.gz" | sha256sum -c -
-          tar -xOf dxvk.tar.gz dxvk-3.1.1/x32/d3d9.dll > "dist/$name/linux/d3d9.dll"
-          curl -fsSL https://raw.githubusercontent.com/doitsujin/dxvk/v3.1.1/LICENSE -o "dist/$name/linux/dxvk-LICENSE"
+          top=$(basename "$url" .tar.gz)
+          tar -xOf dxvk.tar.gz "$top/x32/d3d9.dll" > "dist/$name/linux/d3d9.dll"
+          curl -fsSL "$licence_url" -o "dist/$name/linux/dxvk-LICENSE"
+          echo "$licence_digest  dist/$name/linux/dxvk-LICENSE" | sha256sum -c -
           chmod +x "dist/$name/linux/srr-play"
           (cd dist && zip -r "$name.zip" "$name")
           echo "PACKAGE=dist/$name.zip" >> "$GITHUB_ENV"
@@ -109,9 +111,12 @@ jobs:
         with:
           pattern: SRRLauncher-*
           merge-multiple: true
+      - name: Create checksums
+        run: sha256sum ./*.zip ./*.AppImage | sed 's| \./| |' > SHA256SUMS
+
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           awk 'BEGIN { take = 0 } /^## v/ { if (take) exit; take = 1; next } take { print }' CHANGELOG.md > release-notes.md
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-file release-notes.md ./*.zip ./*.AppImage
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-file release-notes.md ./*.zip ./*.AppImage SHA256SUMS

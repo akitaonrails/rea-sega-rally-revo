@@ -48,6 +48,10 @@
 - The settings window's first-run defaults (the recommended look) apply
   only when `launcher.cfg` is missing or blank; a saved file that happens
   to match the template is read as the player's settings.
+- CI builds and tests with `--locked`; the DXVK licence is fetched from the
+  pinned v3.1.1 commit and checked against its SHA-256, the DXVK folder is
+  derived from `packaging/dxvk.txt` instead of hard-coded, and releases
+  carry a `SHA256SUMS` file.
 
 ## v0.1.1 - 2026-11-02
 

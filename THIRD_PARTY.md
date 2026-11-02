@@ -16,7 +16,7 @@ Add a row before bundling anything new.
 
 | Component | Licence | Source |
 | --- | --- | --- |
-| DXVK 3.1.1, 32-bit `d3d9.dll` | Zlib | github.com/doitsujin/dxvk (pinned in `packaging/dxvk.txt`) |
+| DXVK 3.1.1, 32-bit `d3d9.dll` | Zlib | github.com/doitsujin/dxvk (tarball and licence pinned by SHA-256 in `packaging/dxvk.txt`) |
 | Wine 11.20 (Kron4ek amd64-wow64 build of unmodified WineHQ sources) | LGPL-2.1+ | github.com/Kron4ek/Wine-Builds (pinned in `packaging/appimage/build.sh`); licence and source notes inside the AppImage at `usr/share/doc/wine` |
 | AppImage runtime (appimagetool 1.9.1, type2 runtime 20251108) | MIT | github.com/AppImage/appimagetool, github.com/AppImage/type2-runtime |
 
