@@ -301,16 +301,18 @@ pub fn template() -> String {
 
 /// `--help`: the options from the table, then the switches.
 pub fn usage() -> String {
+    const SWITCH_LINES: &str = concat!(
+        "  --check             check the game folder and exit (exit code 1 if it cannot play)\n",
+        "  --setup             prepare the private copy and the game's settings, without playing\n",
+        "  --download-directx  download Microsoft's DirectX 9 files into the private copy, then exit\n",
+        "  --no-window         play with the saved settings, no launcher window\n",
+        "  --settings          only show the settings window\n",
+        "  --linux             running under srr-play or the AppImage: install DXVK into the copy\n",
+        "  --help              show this help\n",
+    );
     format!(
-        "SRRLauncher {}\n\nSRRLauncher [options]\n\n{}\
-  --check               check the game folder and exit (exit code 1 if it cannot play)\n\
-  --setup               prepare the private copy and the game's settings, without playing\n\
-  --download-directx    download Microsoft's DirectX 9 files into the private copy, then exit\n\
-  --no-window           play with the saved settings, no launcher window\n\
-  --settings            only show the settings window\n\
-  --linux               running under srr-play or the AppImage: install DXVK into the copy\n\
-  --help                show this help\n\n\
-Options override launcher.cfg for one run; only --game is remembered.\n",
+        "SRRLauncher {}\n\nSRRLauncher [options]\n\n{}{SWITCH_LINES}\n\
+         Options override launcher.cfg for one run; only --game is remembered.\n",
         env!("CARGO_PKG_VERSION"),
         spec::usage(OPTIONS, KeyStyle::Underscore)
     )
