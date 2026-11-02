@@ -18,17 +18,17 @@ cp -r "$ROOT/linux" "$pkg/linux"
 cp "$ROOT/sdk/rea-play.sh" "$pkg/linux/rea-play.sh"
 chmod +x "$pkg/linux/srr-play"
 
-# DXVK: line 1 of dxvk.txt is the release tarball, line 2 its licence.
+# DXVK from its pins (verified sha256, mirror fallback, cached).
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-grep -v '^#' "$ROOT/packaging/dxvk.txt" > "$work/pins"
-{ read -r url digest; read -r licence_url licence_digest; } < "$work/pins"
-curl -fsSL "$url" -o "$work/dxvk.tar.gz"
-echo "$digest  $work/dxvk.tar.gz" | sha256sum -c -
-top=$(basename "$url" .tar.gz)
-tar -xOf "$work/dxvk.tar.gz" "$top/x32/d3d9.dll" > "$pkg/linux/d3d9.dll"
-curl -fsSL "$licence_url" -o "$pkg/linux/dxvk-LICENSE"
-echo "$licence_digest  $pkg/linux/dxvk-LICENSE" | sha256sum -c -
+. "$ROOT/sdk/packaging/pins.sh"
+PIN_FILE=$ROOT/packaging/third-party.txt
+if [ -n "${REA_CACHE:-}" ]; then PIN_CACHE=$REA_CACHE/pins; fi
+tarball=$(pin_fetch dxvk "$work")
+top=$(basename "$tarball" .tar.gz)
+tar -xOf "$tarball" "$top/x32/d3d9.dll" > "$pkg/linux/d3d9.dll"
+licence=$(pin_fetch dxvk-license "$work")
+cp "$licence" "$pkg/linux/dxvk-LICENSE"
 
 (cd "$dist" && rm -f "$name.zip" && zip -qr "$name.zip" "$name")
 

@@ -1,0 +1,10 @@
+# Third-party files the package bundles (sdk/packaging/pins.sh format):
+#   name url sha256 [fallback-url ...] [mirror]
+# "mirror": the licence allows republishing; .github/workflows/mirror.yml
+# copies it into this repository's "thirdparty" release, listed last as
+# the fallback.
+#
+# DXVK 3.1.1 (zlib): the release tarball (its x32/d3d9.dll ships in
+# linux/), and its licence at the v3.1.1 tag's commit (the tarball has none).
+dxvk https://github.com/doitsujin/dxvk/releases/download/v3.1.1/dxvk-3.1.1.tar.gz 40565b4a724aadc4433fa4e010b4b23916d9b1f1baeee64e17186db94f54e608 https://github.com/akitaonrails/rea-sega-rally-revo/releases/download/thirdparty/dxvk-3.1.1.tar.gz mirror
+dxvk-license https://raw.githubusercontent.com/doitsujin/dxvk/b1a1c99ab52b687cf950d62c88bc2fa316b41663/LICENSE a5cb1a6ded7d2d7e92d550ba28edd21be2d1d4044662b399887351023e30ce64 https://github.com/akitaonrails/rea-sega-rally-revo/releases/download/thirdparty/LICENSE mirror

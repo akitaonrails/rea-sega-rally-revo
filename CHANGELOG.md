@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Packaging: DXVK and its licence are pins in `packaging/third-party.txt`
+  (SDK `pins.sh`), with this repository's `thirdparty` release as the
+  fallback; `.github/workflows/mirror.yml` fills that release.
+  `packaging/dxvk.txt` is gone.
+- The test-report template asks for the executables' SHA-256 lines from
+  `launcher.log`.
 - Settings window messages say how to fix the problem: a path that is no
   folder points at Browse…, a settings file that cannot be saved names
   it.

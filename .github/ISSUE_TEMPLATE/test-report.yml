@@ -40,6 +40,15 @@ body:
         - Full-rip NoDVD SEGA Rally.exe
         - Both
         - Rejected as unknown (SHA-256 in the log below)
+  - type: textarea
+    id: hashes
+    attributes:
+      label: Executable SHA-256
+      description: |
+        The lines launcher.log writes for SEGA Rally.exe and SEGA Rally_SSE1.exe
+        (they start with the file name and end with "SHA-256 …"). An unknown build
+        is how new editions get supported; never attach the executable itself.
+      render: text
   - type: input
     id: hardware
     attributes:

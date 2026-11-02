@@ -1,0 +1,18 @@
+name: mirror
+
+# Copies the pins marked "mirror" in packaging/third-party.txt into this
+# repository's "thirdparty" release (the pins' last fallback). Run by hand
+# after a pin changes.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    permissions:
+      contents: write
+    uses: akitaonrails/rea-launcher-sdk/.github/workflows/mirror.yml@v0.2.0
+    with:
+      pins: packaging/third-party.txt
