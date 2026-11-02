@@ -41,7 +41,9 @@
   mismatch.
 - The runtime folder is refused inside the game folder even before it
   exists or when reached through `..` or a symlink (the nearest existing
-  parent is resolved).
+  parent is resolved). A drive that cannot be canonicalized (Windows RAM
+  disks, `subst` drives, some network shares) is compared lexically
+  instead of stopping the launch.
 - Syncing the game folder never overwrites the launcher's own runtime
   files: `dxvk.conf` and the launcher's bookkeeping always, and `d3d9.dll`
   while the launcher manages DXVK (Linux, or its marker is present). On

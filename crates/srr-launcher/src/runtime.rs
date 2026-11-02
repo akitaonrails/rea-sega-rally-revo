@@ -145,7 +145,10 @@ fn normalize(path: &Path) -> PathBuf {
 /// Resolves a path even when its final components do not exist yet (a
 /// first-run runtime folder). Canonicalizing the nearest existing ancestor
 /// resolves symlinks and Windows path aliases; the missing suffix is then
-/// normalized lexically. Ported from the CMR04 launcher.
+/// normalized lexically. Ported from the CMR04 launcher. When a volume
+/// cannot be canonicalized at all (Windows RAM disks, `subst` drives and
+/// some network shares answer "Incorrect function"), the absolute path is
+/// normalized lexically instead of refusing to launch.
 pub fn resolve(path: &Path, cwd: &Path) -> Result<PathBuf, String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -173,7 +176,7 @@ pub fn resolve(path: &Path, cwd: &Path) -> Result<PathBuf, String> {
                     .parent()
                     .ok_or_else(|| format!("cannot resolve {}: {error}", path.display()))?;
             }
-            Err(error) => return Err(format!("cannot resolve {}: {error}", path.display())),
+            Err(_) => return Ok(normalize(&absolute)),
         }
     }
 }
@@ -184,8 +187,14 @@ fn check_separate_from(game: &Path, runtime: &Path, cwd: &Path) -> Result<(), St
     } else {
         cwd.join(game)
     };
-    let game = fs::canonicalize(&absolute_game)
-        .map_err(|error| format!("game folder {}: {error}", game.display()))?;
+    let game = match fs::canonicalize(&absolute_game) {
+        Ok(game) => game,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(format!("game folder {}: {error}", game.display()));
+        }
+        // A volume that cannot be canonicalized: compare lexically.
+        Err(_) => normalize(&absolute_game),
+    };
     let runtime = resolve(runtime, cwd)?;
     if runtime.starts_with(&game) || game.starts_with(&runtime) {
         return Err("the runtime folder must be outside the game folder".into());
@@ -412,6 +421,33 @@ mod tests {
         assert!(!game.join("child").exists());
         assert!(check_separate_from(&game, Path::new("../outside"), &game).is_ok());
         fs::remove_dir_all(game).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_uncanonicalizable_path_falls_back_to_lexical_resolution() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp("locked");
+        fs::create_dir_all(root.join("inner")).unwrap();
+        let root = fs::canonicalize(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o000)).unwrap();
+        let probe = fs::canonicalize(root.join("inner"));
+        if probe
+            .as_ref()
+            .is_err_and(|e| e.kind() != io::ErrorKind::NotFound)
+        {
+            // not NotFound (permission denied): lexical, not an error
+            let resolved = resolve(&root.join("inner/./x/../runtime"), &root).unwrap();
+            assert_eq!(resolved, root.join("inner/runtime"));
+            assert!(
+                check_separate_from(&root.join("inner"), &root.join("inner/rt"), &root).is_err()
+            );
+            assert!(
+                check_separate_from(&root.join("inner"), &temp("lexical-elsewhere"), &root).is_ok()
+            );
+        } // else running as root: nothing is denied, nothing to check
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]

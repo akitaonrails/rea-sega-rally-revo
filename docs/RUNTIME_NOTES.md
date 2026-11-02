@@ -175,6 +175,9 @@ was exercised against the real game yet:
   keys, and replaces the file by rename. Check that the game still reads
   the resolution/quality after a launch over a config.ini the game itself
   saved (CRLF), and that controller bindings survive.
+- **Uncanonicalizable drives.** The lexical fallback is tested with a
+  permission-denied folder on Linux only; not tried on a Windows RAM disk,
+  `subst` drive or network share.
 - **config.ini bytes/BOM.** Non-UTF-8 and BOM handling is unit-tested
   only; no real config.ini with such a controller name was available.
 - **Pacer result verification.** The patch is now only written when it
