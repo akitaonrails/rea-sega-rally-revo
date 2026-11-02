@@ -30,6 +30,12 @@
   appended are removed. Comments, unknown keys, CRLF line endings, and the
   `[Audio]`/`[GameController]` sections are kept, and the file is replaced
   atomically (no half-written file after a crash).
+- A `config.ini` that could not be read as UTF-8 (a controller name in
+  another encoding) or not at all was replaced by a fresh seed, losing the
+  player's `[Audio]` and `[GameController]` sections. Only a missing file
+  is seeded now; an unreadable one is left alone, and the file is edited
+  byte for byte, so names in any encoding survive. A UTF-8 byte-order mark
+  no longer hides `[Graphics]` on the first line, and is kept.
 - The stutter fix checks its result against the known patched SHA-256
   before writing the private exe, and refuses (writing nothing) on a
   mismatch.

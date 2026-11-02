@@ -100,9 +100,55 @@ pub fn update_config(
         })
 }
 
+/// The UTF-8 byte-order mark some editors put at the start of config.ini.
+const BOM: &[u8] = b"\xEF\xBB\xBF";
+
+/// [`update_config`] on the file's raw bytes, changing nothing but the
+/// managed `[Graphics]` lines. The text is handled one byte per character
+/// (Latin-1), so a controller name or path in any encoding — valid UTF-8
+/// or not — is written back byte for byte. A leading UTF-8 BOM is set
+/// aside, so `[Graphics]` on the first line still matches, and kept.
+pub fn update_config_bytes(
+    existing: &[u8],
+    resolution: (u32, u32),
+    quality: Quality,
+    vsync: bool,
+) -> Vec<u8> {
+    let (bom, body) = match existing.strip_prefix(BOM) {
+        Some(body) => (BOM, body),
+        None => (&[][..], existing),
+    };
+    let text: String = body.iter().map(|&byte| char::from(byte)).collect();
+    let updated = update_config(&text, resolution, quality, vsync);
+    let mut out = bom.to_vec();
+    // Our edits are ASCII and the rest came from single bytes, so every
+    // character fits in one byte again.
+    out.extend(updated.chars().map(|c| c as u8));
+    out
+}
+
+/// What to write to config.ini given the result of reading it: the
+/// updated file, a fresh seed only when it does not exist, and the read
+/// error otherwise (a file that cannot be read is the player's and must not
+/// be replaced by a seed that would lose `[Audio]`/`[GameController]`).
+pub fn next_config(
+    read: std::io::Result<Vec<u8>>,
+    resolution: (u32, u32),
+    quality: Quality,
+    vsync: bool,
+) -> std::io::Result<Vec<u8>> {
+    match read {
+        Ok(existing) => Ok(update_config_bytes(&existing, resolution, quality, vsync)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(seed_config(resolution, quality, vsync).into_bytes())
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Replace `path` with `text` atomically: a crash or a full disk mid-write
 /// leaves the player's previous file, never a truncated one.
-pub fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+pub fn write_atomic(path: &std::path::Path, text: impl AsRef<[u8]>) -> std::io::Result<()> {
     let mut temp = path.as_os_str().to_owned();
     temp.push(".srr-tmp");
     let temp = std::path::PathBuf::from(temp);
@@ -334,6 +380,62 @@ mod tests {
         assert!(!out.replace("\r\n", "").contains('\n'), "line endings kept");
         // and running it again changes nothing
         assert_eq!(update_config(&out, (3840, 2160), Quality::High, true), out);
+    }
+
+    #[test]
+    fn update_bytes_keeps_non_utf8_controller_names_byte_for_byte() {
+        let mut existing = b"[GameController]\r\nGUID={1234}\r\nName=Manette \xE9tendue\r\n\r\n[Graphics]\r\nVSync=0\r\n".to_vec();
+        assert!(std::str::from_utf8(&existing).is_err());
+        let out = update_config_bytes(&existing, (1920, 1080), Quality::High, true);
+        assert!(out.starts_with(b"[GameController]\r\nGUID={1234}\r\nName=Manette \xE9tendue\r\n"));
+        let text = String::from_utf8_lossy(&out);
+        assert!(text.contains("VSync=1\r\n"));
+        assert_eq!(text.matches("VSync").count(), 1);
+        // valid UTF-8 (a pad name with an accent) survives too
+        existing = "[GameController]\nName=Manette étendue\n"
+            .as_bytes()
+            .to_vec();
+        let out = update_config_bytes(&existing, (1920, 1080), Quality::High, true);
+        assert!(out.starts_with("[GameController]\nName=Manette étendue\n".as_bytes()));
+    }
+
+    #[test]
+    fn only_a_missing_config_is_seeded() {
+        use std::io::{Error, ErrorKind};
+        let seeded = next_config(
+            Err(Error::from(ErrorKind::NotFound)),
+            (1920, 1080),
+            Quality::High,
+            true,
+        )
+        .unwrap();
+        assert!(seeded.starts_with(b"[Audio]"));
+        let denied = next_config(
+            Err(Error::from(ErrorKind::PermissionDenied)),
+            (1920, 1080),
+            Quality::High,
+            true,
+        );
+        assert_eq!(denied.unwrap_err().kind(), ErrorKind::PermissionDenied);
+        let updated = next_config(
+            Ok(b"[GameController]\nGUID={1}\n".to_vec()),
+            (1920, 1080),
+            Quality::High,
+            true,
+        )
+        .unwrap();
+        assert!(updated.starts_with(b"[GameController]\nGUID={1}\n"));
+    }
+
+    #[test]
+    fn update_bytes_matches_graphics_after_a_bom_and_keeps_it() {
+        let existing = b"\xEF\xBB\xBF[Graphics]\nVSync=0\n";
+        let out = update_config_bytes(existing, (1920, 1080), Quality::High, true);
+        assert!(out.starts_with(b"\xEF\xBB\xBF[Graphics]\nVSync=1\n"));
+        assert_eq!(
+            String::from_utf8_lossy(&out).matches("[Graphics]").count(),
+            1
+        );
     }
 
     #[test]

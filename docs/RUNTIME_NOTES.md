@@ -175,6 +175,8 @@ was exercised against the real game yet:
   keys, and replaces the file by rename. Check that the game still reads
   the resolution/quality after a launch over a config.ini the game itself
   saved (CRLF), and that controller bindings survive.
+- **config.ini bytes/BOM.** Non-UTF-8 and BOM handling is unit-tested
+  only; no real config.ini with such a controller name was available.
 - **Pacer result verification.** The patch is now only written when it
   hashes to `4c08c1de…f1ad08f2520`. Rerun `SRR_GAME_DIR=... cargo test
   real_game -- --ignored` (it now goes through `pacer_verified`) and one

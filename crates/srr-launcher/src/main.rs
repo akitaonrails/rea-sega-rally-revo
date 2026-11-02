@@ -416,19 +416,21 @@ mod app {
                 .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
         }
         let config_path = paths.saved_games.join("config.ini");
-        let config_text = match fs::read_to_string(&config_path) {
-            Ok(existing) => gamecfg::update_config(
-                &existing,
-                picture.resolution.unwrap(),
-                picture.quality,
-                picture.vsync,
-            ),
-            Err(_) => {
-                gamecfg::seed_config(picture.resolution.unwrap(), picture.quality, picture.vsync)
-            }
-        };
-        gamecfg::write_atomic(&config_path, &config_text)
-            .map_err(|error| format!("cannot write {}: {error}", config_path.display()))?;
+        // Seed only a missing file; a file that cannot be read is the
+        // player's and is left exactly as it is.
+        match gamecfg::next_config(
+            fs::read(&config_path),
+            picture.resolution.unwrap(),
+            picture.quality,
+            picture.vsync,
+        ) {
+            Ok(bytes) => gamecfg::write_atomic(&config_path, bytes)
+                .map_err(|error| format!("cannot write {}: {error}", config_path.display()))?,
+            Err(error) => log_line(&format!(
+                "warning: cannot read {} ({error}); left unchanged",
+                config_path.display()
+            )),
+        }
         for file in [
             (paths.saved_games.join("SEGA Rally.dat"), "save file"),
             (paths.rank_table.join("SR_RANKTABLES.DAT"), "rank table"),
