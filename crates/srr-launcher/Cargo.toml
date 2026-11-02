@@ -23,3 +23,6 @@ rea-launcher-ui.workspace = true
 # host and under sdk/scripts/wine-test.
 [dev-dependencies]
 rea-launcher-ui = { workspace = true, features = ["testing"] }
+# Decodes the clean-room stutter fix's sites and cave in tests/pacer_disasm.rs
+# (stack balance, preserved registers, exits).
+iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "instr_info", "nasm"] }
