@@ -1,62 +1,44 @@
-# Project rules
+# Sega Rally Revo launcher — instructions for coding agents
 
-This repository builds a compatibility launcher for the player's own PC
-copy of Sega Rally Revo (2007). It is not a distribution of the game. It is
-built on [rea-launcher-sdk](https://github.com/akitaonrails/rea-launcher-sdk).
+This repository makes the player's own PC copy of **Sega Rally Revo**
+(2007) run on modern Windows and Linux (Proton/Wine, AppImage) with a
+settings window, sensible defaults and no manual steps. It is not a
+distribution of the game. It is built on
+[rea-launcher-sdk](https://github.com/akitaonrails/rea-launcher-sdk).
 
-## Read first: the SDK's standards and playbooks
+**Read `sdk/docs/STANDARDS.md` before any work; the playbooks are in
+`sdk/docs/playbooks/`** (vendored from the SDK at the tag in `sdk/VERSION`).
 
-The SDK's rules are binding here. The vendored copies live in `sdk/` once
-`scripts/sdk-sync` brings them; otherwise read them in the SDK repository:
+## Always
 
-- `docs/STANDARDS.md` — non-negotiables, product rules, settings window and
-  CLI, robustness and support, golden snapshots, testing.
-- `docs/playbooks/` — new launcher, SDK change and bumps,
-  community components (bundle first, then a download button), binary
-  patching, contributing back.
+- The game's files are read-only: never committed, copied into the repo or published.
+- Everything outside this repository is the user's and read-only (game installs,
+  other repos, Wine prefixes, saves, home configs, containers, the SDK checkout)
+  unless the user asked for or approved that specific change: back up first,
+  never delete by a broad glob, ask when unsure.
+- Headless by default; open a visible window only when a check needs a person, and say so first.
+- Never print, log or commit credentials.
+- Push, tag, release or post only with the user's go-ahead.
+- Research community fixes first (`docs/RESEARCH.md`); patch only what nobody solved.
+- Never edit `sdk/`; SDK gaps and bugs go to the SDK repository as issues or PRs.
+- Clean up after a release or a long session: `sdk/scripts/clean`, then `--yes` (log scratch in `.work/.task-created`).
 
-In short, the ones that are easy to forget:
+## Checks (all must pass before a commit)
 
-- **Research community fixes first** (PCGamingWiki, GitHub, mod sites) and
-  record them in `docs/RESEARCH.md` with licence and maintenance status.
-  Build on them; reverse-engineer only what nobody solved.
-- **Community components**: bundle when the licence allows; otherwise one
-  button in the window plus a `--download-…` flag, pinned by SHA-256,
-  only when the player presses it. Never a manual step, never a silent
-  download.
-- **Binary patches** are SDK `PatchSet` tables for exact builds (SHA-256),
-  applied from the game folder's pristine bytes, all or nothing.
-- **Settings window changes go through a design skill** (`frontend-design`,
-  then a `web-design-guidelines` review). Accessibility first: contrast
-  (palette test), labels and descriptions on every control, keyboard and
-  pad, disabled controls say why.
-- **GUI/CLI parity**: every option is one row of `config::OPTIONS` (key,
-  flag, values, label, description); the window, `--help`, the template and
-  parsing come from it, and the parity test (`ui::tests`) fails on drift.
-  Every option has an end-to-end test (`plan::tests`), the window has
-  headless `egui_kittest` tests, and the golden snapshots
-  (`crates/srr-launcher/tests/snapshots/`) change only on purpose.
-- **Headless by default**: `sdk/scripts/wine-test` for Windows-target
-  tests, `gamescope --backend headless` for real-game runs.
-- **Contribute back**: findings the community lacks are drafted in
-  `docs/CONTRIBUTIONS.md` for the owner to post; agents never post.
-- **Credentials** (e.g. `~/.config/rea/pcgamingwiki.txt`) are never printed,
-  logged, committed, passed on a command line or handed to other agents.
-- **Everything outside this repository is read-only**: toolchains, `~/.config`,
-  `~/.local`, other repositories, game folders. Tests point `HOME`,
-  `XDG_*` or `LOCALAPPDATA` at temporary folders.
+```sh
+cargo fmt --all --check
+cargo test --workspace --locked
+for t in linux/tests/*.sh packaging/tests/*.sh; do [ -f "$t" ] && sh "$t"; done
+cargo clippy --release --target i686-pc-windows-gnu --workspace -- -D warnings
+cargo deny check
+../rea-launcher-sdk/scripts/sdk-sync --check .   # from the SDK at the tag in sdk/VERSION
+cargo build --release --locked --target i686-pc-windows-gnu
+sdk/packaging/check-imports.sh target/i686-pc-windows-gnu/release/SRRLauncher.exe
+sdk/scripts/wine-test --locked --workspace     # Windows-target tests under Wine, headless
+```
 
-## Non-negotiable boundaries
-
-- Never commit, vendor, embed, or publish original executables, DLLs,
-  media, archives, XML, fonts, track/car data, or other game assets, or
-  anything copied out of them. Snapshots hold only launcher-made bytes.
-- The player's game folder is read only. The launcher builds a separate
-  runtime folder from it.
-- Never commit a developer's absolute game path. Commands and code take an
-  explicit path (or `SRR_GAME_DIR` in the env-gated test).
-- Local experiments, traces, test prefixes and investigation output go
-  under `.work/`.
+MinGW, lld and Wine may live in the `gaming` distrobox: run the last three
+as `distrobox enter gaming -- sh -c 'cd /absolute/path && …'`.
 
 ## Owner decisions
 
@@ -73,16 +55,23 @@ In short, the ones that are easy to forget:
   16:9/16:10 chips did nothing); ultra-wide sizes get the aspect fix.
 - **2026-11-02 — `launcher.cfg` keys use underscores**; the hyphenated
   `frame-limit`/`stutter-fix` stay readable as aliases.
+- **2026-11-02 — the stutter fix gets a clean-room rewrite.** The current
+  `patches::PACER` caves derive from stuken's unlicensed `patch.py`. They
+  are being replaced by a clean-room implementation (a written spec, then
+  an independent implementation, done separately). Until then: don't
+  change the pacer patch code or its tests, and don't copy or quote its
+  cave bytes into docs, issues or other code.
 
 ## Game-specific rules
 
 - Support the v4.0.6.0 PC build by exact hash (clean `SEGA Rally_SSE1.exe`,
   the SSE1 build with the stutter fix applied, the full rip's NoDVD
   `SEGA Rally.exe`). Refuse unknown executables with their SHA-256 and the
-  test-report link; never patch them.
-- Only the private runtime copies are patched: the community stutter fix
-  (`patches::PACER`, clean SSE1 only, result hash verified) and the
-  ultra-wide aspect sets. Everything else is configuration the game reads.
+  issue link; never patch them.
+- Only the private runtime copies are patched, always from the game
+  folder's untouched executable: the stutter fix (`patches::PACER`, clean
+  SSE1 only, result hash verified) and the ultra-wide aspect sets.
+  Everything else is configuration the game reads.
 - `config.ini` is seeded complete only when missing; afterwards only the
   keys of options set in `launcher.cfg` are written (`ini::Owned`). Never
   rewrite `[Audio]`/`[GameController]`; never delete `SEGA Rally.dat` or
@@ -90,33 +79,13 @@ In short, the ones that are easy to forget:
 - Keep options specific to Sega Rally Revo and verified in the game.
   Anti-aliasing and the 62.5 fps Championship cap are deliberately absent;
   unverified values are listed in `docs/RUNTIME_NOTES.md`.
+- Every option is one row of `config::OPTIONS`; end-to-end cases live in
+  `plan::tests`, the window's in `ui::tests`, and the golden snapshots in
+  `crates/srr-launcher/tests/snapshots/` (`SRR_UPDATE_SNAPSHOTS=1` only
+  for an intended change). The env-gated real-game test reads
+  `SRR_GAME_DIR`.
 - The window code draws over `ui::Host` (closures for the Win32 calls), so
   it builds and is tested on the host; keep Win32 calls out of `Window`.
-
-## Code and verification
-
-- Rust for our own code. No `unsafe` or Win32 FFI here: it lives in the
-  SDK's `rea-launcher-win32`.
-- Before each commit: `cargo fmt --all --check`, `cargo test --workspace`,
-  `linux/tests/*.sh`, `cargo clippy --release --target i686-pc-windows-gnu
-  --workspace -- -D warnings`, `cargo deny check`, `sdk-sync --check`, the
-  i686 release build and `sdk/scripts/wine-test --locked --workspace`.
-- Exercise the real game separately and record exactly what was and was not
-  verified in `docs/RUNTIME_NOTES.md`.
-- Conventional Commit subjects; commit only when asked; never push.
-
-## Shared SDK
-
-- Generic code comes from the SDK crates `rea-launcher`,
-  `rea-launcher-win32` and `rea-launcher-ui`, the Linux play library
-  `sdk/rea-play.sh`, `sdk/packaging/` and the reusable workflows.
 - Game knowledge stays here: the edition table, patch sets, the runtime
-  `Policy`, config.ini and registry values, the option table, the palette,
-  art and tabs, `srr-play`'s configuration.
-- Never fork or copy SDK code into this repo, and never edit `sdk/` by
-  hand. A missing feature or an SDK bug is reported upstream; keep local
-  code meanwhile and say so.
-- Bumping: follow the SDK's `docs/playbooks/sdk-change.md` ("Upgrading a
-  launcher"): Cargo tags, `cargo update -p rea-launcher -p
-  rea-launcher-win32 -p rea-launcher-ui`, `scripts/sdk-sync`, the `@vX.Y.Z`
-  of the workflows, Migration items, then compare the golden snapshots.
+  `Policy`, `config.ini` and registry values, the option table, the
+  palette, art and tabs, `srr-play`'s configuration.
