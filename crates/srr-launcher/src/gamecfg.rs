@@ -232,6 +232,13 @@ pub fn dxvk_conf(limit: Option<u32>) -> String {
 /// stray `d3d9=b` in the environment replaces DXVK.
 pub const DXVK_OVERRIDE: &str = "d3d9=n,b";
 
+/// `d3d9` as Wine accepts it in an override: any case, with or without
+/// `.dll`.
+fn is_d3d9(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.strip_suffix(".dll").unwrap_or(&lower) == "d3d9"
+}
+
 /// `WINEDLLOVERRIDES` for the game: our `d3d9` rule first when DXVK is
 /// installed, every unrelated rule the caller set kept (the AppImage's
 /// `mscoree,mshtml=` among them), and only the `d3d9` names we own
@@ -252,7 +259,7 @@ pub fn wine_overrides(existing: Option<&str>, dxvk: bool) -> Option<String> {
         let kept: Vec<&str> = names
             .split(',')
             .map(str::trim)
-            .filter(|name| !name.is_empty() && !name.eq_ignore_ascii_case("d3d9"))
+            .filter(|name| !name.is_empty() && !is_d3d9(name))
             .collect();
         if !kept.is_empty() {
             result.push(format!("{}={action}", kept.join(",")));
@@ -517,6 +524,15 @@ mod tests {
         assert_eq!(
             wine_overrides(Some("d3d8,D3D9=b;dsound=n;;winemenubuilder.exe=d"), true).as_deref(),
             Some("d3d9=n,b;d3d8=b;dsound=n;winemenubuilder.exe=d")
+        );
+        // spelled with .dll, in any case
+        assert_eq!(
+            wine_overrides(Some("d3d9.dll=b;D3D9.DLL,xinput1_3.dll=n"), true).as_deref(),
+            Some("d3d9=n,b;xinput1_3.dll=n")
+        );
+        assert_eq!(
+            wine_overrides(Some("d3d9x.dll=b"), true).as_deref(),
+            Some("d3d9=n,b;d3d9x.dll=b")
         );
         // no DXVK of ours: the caller's value is left exactly as it was
         assert_eq!(wine_overrides(None, false), None);

@@ -57,8 +57,8 @@
   come back to Windows after a Linux run.
 - With the bundled DXVK (srr-play, AppImage) the game starts with
   `WINEDLLOVERRIDES` carrying `d3d9=n,b` first, so a `d3d9=b` elsewhere in
-  the environment cannot swap DXVK for Wine's own d3d9; every other rule
-  you set is kept. Wine is also recognised from `WINEPREFIX`,
+  the environment (also spelled `d3d9.dll`, in any case) cannot swap DXVK
+  for Wine's own d3d9; every other rule you set is kept. Wine is also recognised from `WINEPREFIX`,
   `WINELOADER` or `STEAM_COMPAT_DATA_PATH` when a Wine build hides
   `wine_get_version`.
 - The settings window's first-run defaults (the recommended look) apply
