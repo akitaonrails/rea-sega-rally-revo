@@ -12,11 +12,14 @@ path = "src/main.rs"
 
 [dependencies]
 rea-launcher.workspace = true
+# Host-testable SDK rules used by the library: who sees a message
+# (`report::Run`/`Audience`) and what a second start does
+# (`instance::SecondStart`); the Win32 calls themselves are cfg(windows).
+rea-launcher-win32.workspace = true
 # Takes the D3DX9 DLLs out of Microsoft's DirectX package (MIT).
 cab = "0.6"
 
 [target.'cfg(windows)'.dependencies]
-rea-launcher-win32.workspace = true
 rea-launcher-ui.workspace = true
 
 # The palette test and the headless window tests (egui_kittest) run on the

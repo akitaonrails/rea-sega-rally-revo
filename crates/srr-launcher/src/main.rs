@@ -64,47 +64,31 @@ mod app {
 
     const TITLE: &str = "Sega Rally Revo launcher";
 
-    /// Whether a person may be watching (not `--no-window` from a script).
-    fn interactive() -> bool {
-        !std::env::args().skip(1).any(|arg| arg == "--no-window")
+    /// Who may see this run's messages: the SDK's rule
+    /// (`report::audience`) for this command line (`config::run_kind`).
+    /// Under Wine a game run started with `--no-window` (srr-play, the
+    /// AppImage, Proton) has a player watching; `--settings --linux` and
+    /// `--check --linux` report through srr-play instead.
+    fn mode() -> Mode {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        report::audience(config::run_kind(&args)).mode()
     }
 
     /// An error the launcher stops on: a dialog when a person may be
-    /// watching, and stdout, which `srr-play` and Proton keep in a log
-    /// (SDK `report`, so it reaches the player under Wine too).
+    /// watching, and stdout, which `srr-play` and Proton keep in a log.
     pub fn fatal(text: &str) {
-        report::fatal(
-            TITLE,
-            text,
-            Mode::Play {
-                interactive: interactive(),
-            },
-        );
+        report::fatal(TITLE, text, mode());
     }
 
     /// A message while preparing to play (another launcher is running).
     fn play_note(text: &str) {
-        report::note(
-            TITLE,
-            text,
-            Mode::Play {
-                interactive: interactive(),
-            },
-            true,
-        );
+        report::note(TITLE, text, mode(), true);
     }
 
     /// Output of a command (`--help`, `--check`, `--download-directx`):
     /// the terminal, or a dialog when nobody sees it.
     fn command(text: &str) {
-        report::note(
-            TITLE,
-            text,
-            Mode::Command {
-                interactive: interactive(),
-            },
-            false,
-        );
+        report::note(TITLE, text, mode(), false);
     }
 
     fn settings_path() -> PathBuf {

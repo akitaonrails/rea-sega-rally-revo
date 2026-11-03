@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 
+use rea_launcher_win32::report::Run;
+
 use rea_launcher::cfg::{
     self, ArgError, KeyStyle, Rejected, Resolution,
     spec::{self, Kind, OptionSpec, Value},
@@ -378,6 +380,33 @@ impl Cli {
     /// True when only switches (no options) were given.
     pub fn options_given(&self) -> bool {
         self.settings != Settings::default()
+    }
+}
+
+/// The command flags beyond the SDK's (`report::COMMAND_FLAGS`): runs
+/// whose output is their result.
+pub const COMMANDS: &[&str] = &["--download-directx"];
+
+impl Cli {
+    /// The kind of run this command line asks for (SDK `report::Run`),
+    /// which decides who sees its messages (`report::audience`).
+    pub fn run(&self) -> Run {
+        Run {
+            command: self.has("--check") || COMMANDS.iter().any(|flag| self.has(flag)),
+            no_window: self.has("--no-window"),
+            settings_only: self.has("--settings"),
+            linux: self.has("--linux"),
+        }
+    }
+}
+
+/// The kind of run `args` (program name excluded) ask for: from the
+/// parsed command line, or, when it doesn't parse (`--help`, a bad flag),
+/// from the flags it holds (`Run::from_args`).
+pub fn run_kind(args: &[String]) -> Run {
+    match Settings::parse_args(args.iter().cloned()) {
+        Ok(cli) => cli.run(),
+        Err(_) => Run::from_args(args, COMMANDS),
     }
 }
 
@@ -778,5 +807,51 @@ mod tests {
         let saved = set_key(&text, "vsync", "on");
         assert!(saved.contains("Jogos d'Ação\r\nquality = high\r\nvsync = on\r\n"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Who sees a run's messages (SDK `report::Audience`), for the command
+    /// lines srr-play, the AppImage, Proton and a player use.
+    #[test]
+    fn the_sdk_decides_who_sees_each_runs_messages() {
+        use rea_launcher_win32::report::{Audience, Mode};
+        let mode = |list: &[&str], wine: bool| {
+            let list: Vec<String> = list.iter().map(|a| a.to_string()).collect();
+            Audience::of(run_kind(&list), wine).mode()
+        };
+        let play = |interactive| Mode::Play { interactive };
+        let command = |interactive| Mode::Command { interactive };
+        // srr-play's game run: a player watches, so errors become dialogs.
+        assert_eq!(mode(&["--no-window", "--linux"], true), play(true));
+        // srr-play's settings window reports itself (or exit 4).
+        assert_eq!(mode(&["--settings", "--linux"], true), play(false));
+        // srr-play reads --check's output and exit code.
+        assert_eq!(mode(&["--check", "--linux"], true), command(false));
+        // Proton / a double click: the window, then the game.
+        assert_eq!(mode(&[], true), play(true));
+        assert_eq!(mode(&[], false), play(true));
+        // Proton starting the game run without the window: under Wine
+        // stdout goes to a log nobody reads.
+        assert_eq!(mode(&["--no-window"], true), play(true));
+        // A script on Windows.
+        assert_eq!(mode(&["--no-window"], false), play(false));
+        assert_eq!(mode(&["--check", "--no-window"], false), command(false));
+        // Commands: their output is the result.
+        assert_eq!(mode(&["--check"], false), command(true));
+        assert_eq!(mode(&["--help"], true), command(true));
+        assert_eq!(mode(&["--download-directx"], false), command(true));
+        assert_eq!(
+            mode(&["--download-directx", "--linux"], true),
+            command(false)
+        );
+        // --setup prepares a game run.
+        assert_eq!(mode(&["--setup", "--no-window"], false), play(false));
+        // A bad command line still knows its flags.
+        assert_eq!(
+            mode(&["--bogus", "--no-window", "--linux"], true),
+            play(true)
+        );
+        assert_eq!(mode(&["--check", "--vsync=maybe"], false), command(true));
+        // A value spelled like a flag is a value once the line parses.
+        assert_eq!(mode(&["--game", "--check"], false), play(true));
     }
 }
