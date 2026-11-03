@@ -442,13 +442,6 @@ impl Window {
                 stutter_disabled,
             )
         });
-        if matches!(self.check, Check::Found { pacer: false, .. }) {
-            widgets::error_note(
-                ui,
-                "This folder has no clean SEGA Rally_SSE1.exe, so the game runs without \
-                 the stutter fix.",
-            );
-        }
         let frame_disabled = form::frame_limit_disabled(self.host.dxvk);
         if let Some(text) = table_row(
             ui,

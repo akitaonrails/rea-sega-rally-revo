@@ -163,11 +163,16 @@ impl Form {
 
 /// Why the stutter-fix chips are disabled, if they are: `folder` is
 /// `None` before a usable game folder is chosen, else whether it holds the
-/// clean SSE1 exe the pacer patch needs.
+/// clean SSE1 exe the pacer patch needs. The SDK chips write it under the
+/// row (a pad player never hovers); the row's description already says
+/// what the fix needs, so this says what it means for this folder.
 pub fn stutter_fix_disabled(folder: Option<bool>) -> Option<&'static str> {
     match folder {
         None => Some("Choose the game folder first."),
-        Some(false) => Some("Needs the clean SEGA Rally_SSE1.exe in the game folder."),
+        Some(false) => Some(
+            "This folder has no clean SEGA Rally_SSE1.exe, so the game runs without the \
+             stutter fix.",
+        ),
         Some(true) => None,
     }
 }

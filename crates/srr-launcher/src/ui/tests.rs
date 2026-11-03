@@ -203,6 +203,29 @@ fn disabled_controls_say_why() {
     ));
 }
 
+/// A pad player never hovers: a disabled row's reason is written under it
+/// (the SDK's chips and spec rows), once.
+#[test]
+fn disabled_reasons_show_in_place_once() {
+    let (mut ui, _, _) = open(None, false, "reasons-in-place");
+    ready(&mut ui);
+    ui.state_mut().check = Check::Found {
+        names: vec!["PC v4.0.6.0 (NoDVD SEGA Rally.exe)"],
+        pacer: false,
+    };
+    ui.run();
+    let shown =
+        |ui: &Harness<'static, Window>, text: &str| ui.query_all_by_label_contains(text).count();
+    // The stutter fix: no clean SSE1 in this folder. The description says
+    // what the fix needs; the reason, under the chips, what that means here.
+    let reason = form::stutter_fix_disabled(Some(false)).unwrap();
+    assert!(reason.contains("runs without the stutter fix"), "{reason}");
+    assert_eq!(shown(&ui, reason), 1);
+    assert_eq!(shown(&ui, "SEGA Rally_SSE1.exe"), 2, "description + reason");
+    // The frame limit: no DXVK on native Windows.
+    assert_eq!(shown(&ui, "Needs DXVK"), 1);
+}
+
 #[test]
 fn play_saves_every_value_to_launcher_cfg() {
     let (mut ui, _, dir) = open(None, true, "save");
