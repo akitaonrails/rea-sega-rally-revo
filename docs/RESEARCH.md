@@ -243,6 +243,17 @@ Windows Update never installs them.
 - `d3dcompiler_47` (winetricks' third verb) was a DXVK safeguard from DXVK
   issue #3320 (falling trees, fixed by 2023 drivers); not needed for d3d9.
 
+## Owner decisions
+
+- **2026-11-02 — the NoDVD `SEGA Rally.exe` is a supported edition**
+  (recorded in `AGENTS.md` and `THIRD_PARTY.md` that day). The widely
+  mirrored full rip ships a NoDVD `SEGA Rally.exe` (`ad84ecea…2ba391d7`,
+  table above); the launcher identifies it by SHA-256 and runs it
+  unpatched, or with the aspect fix, when the stutter fix cannot run. We
+  never write, ship, download or apply a crack, and never tell a player
+  how to get such a build. The waiver line is in `.rea-check-waivers`
+  (`drm-exception`).
+
 ## Old-game trouble spots
 
 | Spot | Status for this game |

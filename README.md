@@ -44,7 +44,8 @@ loading wait is cut out).*
 Your PC copy of Sega Rally Revo, version **4.0.6.0** (the English, French,
 German, Spanish, Italian and Polish release). The launcher plays the clean
 `SEGA Rally_SSE1.exe` (the stutter fix needs this one) or the no-DVD
-`SEGA Rally.exe` found in common copies.
+`SEGA Rally.exe` found in common copies, as they are: it can't and won't
+remove a disc check or any other DRM.
 
 The launcher checks the exact game files before it changes anything. A
 version it doesn't know is refused with a code (its SHA-256) and a link to
