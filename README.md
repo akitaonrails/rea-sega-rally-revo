@@ -215,7 +215,8 @@ launcher from, or show a message box when there is none. Exit codes for
 scripts: after a game, the game's own exit code; 1 for an error or when
 `--check` found a problem; with
 `--settings`, 0 Play pressed, 3 closed without Play, 4 no window possible;
-5 another launcher is already running the game.
+5 the game is already running (another launcher is running it, or it
+is still running from the launcher's copy).
 
 The game always runs fullscreen. Under Wine that fullscreen is its own
 Wine desktop, a window of the chosen size on your desktop.
