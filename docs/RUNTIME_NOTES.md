@@ -481,26 +481,47 @@ registry round trip (ours written, the player's value kept, ours taken
 back) is covered by `tests/wine_app_overrides.rs` under
 `sdk/scripts/wine-test`.
 
-## Unreleased — rea-launcher-sdk v0.4.1 (needs real-game checks)
+## 2026-11-03 — rea-launcher-sdk v0.4.1 on the real game (headless)
 
-Behaviour that changed with the bump and needs the real game, headless as
-in the verification pass above:
+Release build of this branch packaged with `packaging/package.sh` (DXVK
+3.1.1 `d3d9.dll`), against the owner's full rip (read-only, Wine drive
+`D:` through a symlink in the test prefix; both exe hashes unchanged and
+no file in the game folder newer than the runs). Everything ran in the
+`gaming` distrobox from `env -i`: a new throwaway prefix, `HOME`, XDG dirs
+and `XDG_RUNTIME_DIR` under `.work/rg2/`, sound to a private PipeWire
+null sink (WirePlumber's device monitors off), each run inside its own
+`gamescope --backend headless` (as Game Mode: srr-play starts no gamescope
+of its own) with a finite timeout. Input by XTest on gamescope's Xwayland;
+screenshots by `gamescopectl`. The supervisor found the test's processes
+by name plus their working directory (under `.work/rg2/`, or the prefix's
+wineserver directory) and never read a command line or an environment;
+after each run it timed how long each kind took to go and swept leftovers
+by exact PID. Evidence: `.work/rg2/{logs,shots}/` (local).
 
-- Each look (Modern, Original 2007, Steam Deck) still reaches the game.
-- A Play-time error under srr-play (`--no-window --linux`, e.g. an
-  unknown game folder) shows a dialog (`report::audience`); `--check
-  --linux` and `--settings --linux` show none.
-- A second launcher start while the game runs: refused, exit 5, one game
-  (`instance::SecondStart`, `Window::Own`); log `second start: … refused`.
-- A launcher start while the copy's game runs without its launcher
-  (killed): refused before the sync, exit 5 (`process::find_running`).
-- A second `srr-play --play` while the game runs: exit 5 now (was 0).
-- Fresh prefix: the settings window opens on the first start
-  (`gpu::prefer_glx_or_restart` runs the launcher once more).
-- Quit paths leave nothing behind: the game's Quit, a close request /
-  Alt+F4, `srr-play stop`, SIGINT/SIGTERM to srr-play.
-- launcher.log names per-exe DLL overrides kept as not ours
-  (`Applied::matching`) on a prefix that v0.2.0 set up.
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Fresh prefix, first start of `srr-play` (settings window) | VERIFIED: the window shows on the first start; launcher.log `OpenGL through GLX (UseEGL=N); the restarted launcher exited with 3`; Alt+F4 closes it, srr-play exits 0 | `r0-fresh-window` |
+| Look Modern (`look = modern`, 1920x1080) | VERIFIED: 1418 files copied, pacer applied (`cb9a5a34…ff65`), config.ini 1920x1080, the attract demo renders | `r1-modern-ownquit` |
+| Look Original 2007 (`--look original`) | VERIFIED: config.ini 1280x720 Normal vsync, renders | `r2-original-altf4` |
+| Look Steam Deck (`--look steam-deck`, 1280x800) | VERIFIED: config.ini 1280x800 High, renders | `r3-steamdeck-stop` |
+| The game's own Quit (Escape → "Are you sure…" → Enter) | VERIFIED: game, launcher, helper gone in 1.5 s, wineserver 3.1 s | `r1-modern-ownquit` |
+| Alt+F4 (XTest) | VERIFIED: game and launcher 1.5 s, wineserver 3.3 s | `r2-original-altf4` |
+| `srr-play stop` | VERIFIED: everything gone in 1.4 s | `r3-steamdeck-stop` |
+| SIGINT / SIGTERM to a waiting srr-play (`SRR_WAIT=1`) | VERIFIED: game, launcher, helper 1.4 s, wineserver 1.4 s / 3.0 s | `r4-sigint`, `r5-sigterm` |
+| gamescope closed (TERM) | VERIFIED for the launcher: game, launcher, helper, wineserver gone in 1.6 s. gamescope 3.17 itself needed a KILL (it often hangs or segfaults on exit; not ours) | `r6-killgs` |
+| Second launcher start while the game runs | VERIFIED: the "already running" message box (screenshot), exit 5, still one game; log `second start: … refused` | `r7-second-launcher` |
+| Second `srr-play --play` while the game runs | VERIFIED: "already running", exit 5 (was 0), one game | `r8-second-srrplay` |
+| Launcher killed while the game runs, then started again | VERIFIED: refused before the sync by `process::find_running` (`the game from C:\users\…\SegaRally runs: process [288]`), message box, exit 5, one game | `r9-orphan` |
+| Play-time error under srr-play (`--play --game` an empty folder) | VERIFIED: a message box with the reason and the unknown-edition link (screenshot); launcher.log has it too | `r10-play-error` |
+| `--check --linux` | VERIFIED: exit 0 in 2 s, no message box | `r11-check-linux` |
+| Settings window with the real folder | Same look as the README screenshots (the SDK changes only touch disabled rows, which a found folder doesn't show); not retaken | `r12-window` |
+| Per-exe DLL overrides from a v0.2.0 prefix (`Applied::matching`) | NOT CHECKED: needs a prefix set up by v0.2.0; covered by the SDK's tests and `tests/wine_app_overrides.rs` | — |
+
+Observations: srr-play in waiting mode (`SRR_WAIT=1`) exited 0 after the
+launcher refused an empty folder with exit 1 (the error box did show);
+the helper's exit code is the SDK's. The harness's own gamescope stayed
+up to ~3 minutes after runs without a game (its child waits for one),
+then exited; nothing of the launcher's was left.
 
 ## 2026-11-02 — the clean-room stutter fix (integration)
 
