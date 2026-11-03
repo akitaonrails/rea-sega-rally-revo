@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.3.1 - 2026-11-03
+
 - **The README lists the game's keyboard keys.** They come from the game's
   manual. The game has no menu to change them, and neither does the
   settings tool that came with it; changing keys is tracked in issue #1.
