@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The README lists the game's keyboard keys.** They come from the game's
+  manual. The game has no menu to change them, and neither does the
+  settings tool that came with it; changing keys is tracked in issue #1.
+
 ## v0.3.0 - 2026-11-03
 
 - Updated rea-launcher-sdk to v0.4.1.

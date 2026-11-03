@@ -189,7 +189,7 @@ its key list confirms the config.ini schema (including `RefreshRate`,
 Anti-aliasing stays off (`AntiAliasingLevel=0`), matching the proven
 configuration; multisample stability under DXVK is untested.
 
-## Keyboard keys (issue #1, 2026-11-03, in progress)
+## Keyboard keys (issue #1, 2026-11-03, paused)
 
 A player asked to change the keyboard keys. What is established:
 
@@ -219,10 +219,11 @@ A player asked to change the keyboard keys. What is established:
   through small binding objects (key at `+0xC`, e.g. thunk 0x414EA0); the
   code that creates them, and so the key source, is not found yet.
 
-Next steps: find the binding objects' constructors (or break on 0x578160
-in a race and walk back from the caller), then decide between patching
-the key source in the private copy and a launcher option. Nothing ships
-until a changed key is seen to work in a race.
+Paused by owner decision on 2026-11-03; issue #1 stays open as a feature
+request. To resume: find the binding objects' constructors (or break on
+0x578160 in a race and walk back from the caller), then decide between
+patching the key source in the private copy and a launcher option.
+Nothing ships until a changed key is seen to work in a race.
 
 ## Community fixes: licence and maintenance
 
