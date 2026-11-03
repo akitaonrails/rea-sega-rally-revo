@@ -5,13 +5,12 @@
 //! the command line). A diff after an SDK upgrade or a refactor must be
 //! explained by an intended change or an SDK Migration item; never
 //! regenerate blindly. Regenerate, then review every changed file:
-//! `SRR_UPDATE_SNAPSHOTS=1 cargo test --test snapshots`.
+//! `SRR_UPDATE_SNAPSHOTS=1 cargo test --test snapshots` (SDK `rea_launcher::snapshots!`).
 //!
 //! Only launcher-made bytes appear here (the patch tables are ours);
 //! nothing comes from the game's files.
 
 use std::fmt::Write;
-use std::path::PathBuf;
 
 use rea_launcher::ini::Owned;
 use rea_launcher::patch;
@@ -32,20 +31,13 @@ const RUNTIME: &str = r"C:\users\steamuser\AppData\Local\SRRLauncher\SegaRally";
 /// changed vsync and a custom key).
 const PLAYER_CONFIG: &str = "[Audio]\r\nDriverGUID=00000000-0000-0000-0000-000000000000\r\nQuality=2\r\nSoftwareEmulation=0\r\n\r\n[GameController]\r\nGUID={6F1D2B61-D5A0-11CF-BFC7-444553540000}\r\nMapping=0001000100000001\r\n\r\n[Graphics]\r\nHorizontalResolution=1920\r\nVerticalResolution=1080\r\nGraphicQuality=2\r\nVSync=0\r\nRunWindowed=0\r\n";
 
+/// The SDK's golden snapshots (`rea_launcher::snapshots!`): stored as
+/// `<version>`-free text, CRLF read as LF, the first differing line named;
+/// `SRR_UPDATE_SNAPSHOTS=1` (or the SDK's `REA_UPDATE_SNAPSHOTS=1`) writes.
 fn snapshot(name: &str, actual: &str) {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/snapshots")
-        .join(format!("{name}.txt"));
-    if std::env::var_os("SRR_UPDATE_SNAPSHOTS").is_some() {
-        std::fs::write(&path, actual).unwrap();
-        return;
-    }
-    let expected = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("no snapshot {}; see the module docs", path.display()));
-    assert!(
-        expected == actual,
-        "snapshot {name} changed; review the diff:\n--- expected\n{expected}\n--- actual\n{actual}"
-    );
+    rea_launcher::snapshots!()
+        .update_var("SRR_UPDATE_SNAPSHOTS")
+        .assert(&format!("{name}.txt"), actual);
 }
 
 /// What the settings window saves for `look` on `screen`.
