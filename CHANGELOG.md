@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.3.0 - 2026-11-03
+
 - Updated rea-launcher-sdk to v0.4.1.
 - **The settings window opens on the very first start under Wine.** On a
   new Wine prefix the window could stay invisible until the next start;
