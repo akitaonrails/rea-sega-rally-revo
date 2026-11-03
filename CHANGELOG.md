@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- Updated rea-launcher-sdk to v0.4.1.
+- **The settings window opens on the very first start under Wine.** On a
+  new Wine prefix the window could stay invisible until the next start;
+  the launcher now restarts itself once, right away, so it draws.
+- **The game can't be started twice from the same copy.** If the launcher
+  was closed or killed while the game kept running, the next start copied
+  files over the running game and started a second one. It now says the
+  game is already running and stops (exit code 5).
+- **A second start only finds this launcher's window.** It looked for any
+  window named "Sega Rally Revo", which a folder of that name open in
+  Explorer could match too.
+- **Errors under srr-play and Proton reach you.** Whether a message box is
+  shown now follows the rule all rea launchers share: a game started by
+  srr-play, the AppImage or Proton shows its errors in a box, while
+  srr-play's own `--check` and settings runs leave the reporting to
+  srr-play. A second `srr-play --play` while the game runs now exits with
+  5 instead of 0.
+- The stutter fix's "why is this greyed out" note now shows once, under
+  its buttons, also for pad players who can't hover: "This folder has no
+  clean SEGA Rally_SSE1.exe, so the game runs without the stutter fix."
+- The README says plainly that the launcher runs the clean and no-DVD
+  builds as they are and can't and won't remove DRM.
+
 ## v0.2.0 - 2026-11-02
 
 - **The stutter fix is now our own clean-room implementation.** It was
