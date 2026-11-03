@@ -167,6 +167,29 @@ support for this game.
 Keep the game's force feedback **off**: it is a known crash (reported on
 Windows 10) and adds nothing.
 
+## Keyboard
+
+You can also drive with the keyboard. These are the game's keys, from its
+manual:
+
+| Key | Action |
+| --- | --- |
+| A | Accelerate |
+| Z | Brake / reverse |
+| , (comma) | Steer left |
+| . (period) | Steer right |
+| Space | Handbrake |
+| S | Shift up |
+| X | Shift down |
+| Left Ctrl | Change camera |
+| Tab | Show or hide driver names |
+| O / P | Time Trial: class up / class down |
+
+The game has no menu to change these keys. The settings tool that came
+with the game can't change them either: it only sets up DirectInput pads
+and wheels. Changing keys is tracked in
+[issue #1](https://github.com/akitaonrails/rea-sega-rally-revo/issues/1).
+
 ## Options
 
 Every option has the same name in the window, in `launcher.cfg` (with
