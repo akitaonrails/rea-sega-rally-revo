@@ -51,6 +51,9 @@ REA_WAIT=${SRR_WAIT:-}
 REA_ALWAYS_WAIT=0                 # detached unless SRR_WAIT (the AppImage)
 REA_CFG_APPDATA=SRRLauncher
 REA_GAMESCOPE=off                 # see the header: the isolated Wine desktop instead
+# The size each look gives the game (config::Look::preset), for the SDK's
+# gamescope sizing should gamescope ever be turned on here.
+REA_LOOK_SIZES="original=1280x720 modern=screen steam-deck=1280x800"
 REA_GPU_ICD_PIN=1                 # pin NVIDIA's Vulkan ICD on hybrid hosts
 REA_PLAY_ARGS="--no-window --linux"
 REA_SDL_ENV=SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1
