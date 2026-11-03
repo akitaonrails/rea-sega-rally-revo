@@ -49,6 +49,14 @@ pub fn message(second: SecondStart) -> Option<String> {
     }
 }
 
+/// Before Play: the game from this runtime still runs (the ids
+/// `process::find_running` found for its executables), so Play is refused
+/// as for a second start without a window. A launcher that was killed
+/// while its game ran released the instance, but not the game.
+pub fn before_play(running: &[u32]) -> Option<SecondStart> {
+    (!running.is_empty()).then_some(SecondStart::Busy)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,6 +120,15 @@ mod tests {
         let second = SecondStart::decide(true, || false, || unreachable!());
         assert_eq!(second, SecondStart::Busy);
         assert_ne!(second.exit_code(), 0);
+    }
+
+    #[test]
+    fn play_is_refused_while_the_runtimes_game_runs() {
+        assert_eq!(before_play(&[]), None);
+        let refused = before_play(&[4242]).unwrap();
+        assert_eq!(refused, SecondStart::Busy);
+        assert_eq!(refused.exit_code(), ALREADY_RUNNING);
+        assert!(message(refused).unwrap().contains("Quit the game first"));
     }
 
     #[test]

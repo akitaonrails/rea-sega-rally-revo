@@ -37,7 +37,7 @@ mod app {
     use rea_launcher_win32::instance::Window;
     use rea_launcher_win32::reg::Key;
     use rea_launcher_win32::report::{self, Mode};
-    use rea_launcher_win32::{disk, display as screen, gpu, http, wine, xinput};
+    use rea_launcher_win32::{disk, display as screen, gpu, http, process, wine, xinput};
     use srr_launcher::config::{self, Settings};
     use srr_launcher::edition::{self, GameEditions};
     use srr_launcher::plan::{self, Env};
@@ -359,6 +359,24 @@ mod app {
             .clone()
             .unwrap_or_else(|| home().join("SegaRally"));
         paths::check_separate(&game, &runtime_dir)?;
+        // The game from this copy may outlive its launcher (killed, or back
+        // early from the isolated Wine desktop): never sync over it or
+        // start a second one.
+        let running: Vec<u32> = [edition::MAIN_EXE, edition::SSE1_EXE]
+            .iter()
+            .flat_map(|exe| process::find_running(&runtime_dir.join(exe)))
+            .collect();
+        if let Some(refused) = instance::before_play(&running) {
+            log_line(&format!(
+                "{} (the game from {} runs: process {running:?})",
+                refused.log_line(),
+                runtime_dir.display()
+            ));
+            if let Some(message) = instance::message(refused) {
+                play_note(&message);
+            }
+            return Ok(refused.exit_code() as u32);
+        }
         if !linux {
             // Back on native Windows after a Linux run: drop our DXVK first,
             // so the sync brings the player's own d3d9.dll (if any) back.
