@@ -189,6 +189,41 @@ its key list confirms the config.ini schema (including `RefreshRate`,
 Anti-aliasing stays off (`AntiAliasingLevel=0`), matching the proven
 configuration; multisample stability under DXVK is untested.
 
+## Keyboard keys (issue #1, 2026-11-03, in progress)
+
+A player asked to change the keyboard keys. What is established:
+
+- The keys are fixed. The manual lists "Configuration 1 (Keyboard)": A
+  accelerate, Z brake/reverse, `,`/`.` steer, Space handbrake, S/X shift,
+  Left Ctrl camera, Tab driver names, O/P Time Trial class.
+- The PC game's Options menu has Audio, Display and Online only (checked
+  in the real game, headless, keyboard as the player's device). The manual
+  describes an Options > Controller page that this build doesn't show on
+  the keyboard.
+- `SEGARallyLauncher.exe` (the .NET tool, decompiled with ilspycmd for
+  this note only) can't change keys either. `ControllerOptionsControl`
+  enumerates DirectInput game controllers only (device class 4, types
+  19–22, Xbox 360 pads excluded). Its `[GameController] Mapping=` string
+  is `version(4 hex) 1 layout ff GUID(36) feedback` followed by eleven
+  4-hex `eInput` values (axes, POV, buttons 0–15) for Accelerate, Brake,
+  Handbrake, CameraChange, LookBack, GearUpshift, GearDownshift,
+  ToggleDriverName, Start, SteerLeft, SteerRight.
+- In `SEGA Rally_SSE1.exe` the keyboard is a DirectInput device
+  (`GUID_SysKeyboard` used at 0x578468), read with `GetDeviceState` into a
+  256-byte buffer and copied to the input object's key arrays (`+0x39`,
+  previous frame `+0x139`, per player 0x2048 apart). `IsKeyDown` is vtable
+  slot `+0x28` of the input object (vtable 0x6FB298, function 0x578160).
+- The default keys are not constants in the code (no `push`/`mov`
+  operands, byte or word stores), not a table in the exe or in the
+  live input object, and not stored as characters. Driving reads keys
+  through small binding objects (key at `+0xC`, e.g. thunk 0x414EA0); the
+  code that creates them, and so the key source, is not found yet.
+
+Next steps: find the binding objects' constructors (or break on 0x578160
+in a race and walk back from the caller), then decide between patching
+the key source in the private copy and a launcher option. Nothing ships
+until a changed key is seen to work in a race.
+
 ## Community fixes: licence and maintenance
 
 | Project | What it fixes | Licence | Maintained | Decision |
