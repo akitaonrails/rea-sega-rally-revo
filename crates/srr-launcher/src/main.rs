@@ -615,8 +615,12 @@ mod app {
                 Ok(applied) => {
                     if !on.is_empty() {
                         log_line(&format!(
-                            "wine: per-exe DLL overrides for {} (native,builtin): written {:?}, already ours {:?}, the player's kept {:?}",
-                            plan.launch, applied.written, applied.ours, applied.player
+                            "wine: per-exe DLL overrides for {} (native,builtin): written {:?}, already ours {:?}, same value, not ours (kept) {:?}, the player's kept {:?}",
+                            plan.launch,
+                            applied.written,
+                            applied.ours,
+                            applied.matching,
+                            applied.player
                         ));
                     }
                 }
