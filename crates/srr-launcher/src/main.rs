@@ -34,6 +34,7 @@ mod app {
     use rea_launcher::ini::Owned;
     use rea_launcher::log::Log;
     use rea_launcher::{cfg, download, fsx, paths};
+    use rea_launcher_win32::gpu::Glx;
     use rea_launcher_win32::instance::Window;
     use rea_launcher_win32::reg::Key;
     use rea_launcher_win32::report::{self, Mode};
@@ -232,9 +233,10 @@ mod app {
             }
             Err(message) => return Err(message),
         };
-        // One launcher at a time, held until the game exits: a second
-        // start brings the window forward or refuses to play.
-        let _instance = if instance::needs_instance(&cli.switches) {
+        // One launcher at a time, held until the game exits (`_held` lives
+        // to the end of `run`): a second start brings the window forward
+        // or refuses to play.
+        let mut _held = if instance::needs_instance(&cli.switches) {
             match rea_launcher_win32::instance::single(instance::NAME) {
                 Ok(guard) => Some(guard),
                 Err(running) => {
@@ -282,11 +284,26 @@ mod app {
         let wants_window =
             settings_only || (!cli.options_given() && !no_window && !check_only && !setup_only);
         if wants_window {
-            if wine::is_wine() {
-                match gpu::prefer_glx() {
-                    Ok(true) => log_line("Wine settings window: OpenGL through GLX (UseEGL=N)"),
-                    Ok(false) => {}
-                    Err(error) => log_line(&format!("warning: {error}")),
+            // On a fresh Wine prefix the window draws only through GLX,
+            // which takes effect in a new process: the SDK runs this
+            // launcher once more (the instance goes with it) and we exit
+            // with that run's code.
+            match gpu::prefer_glx_or_restart(_held.take()) {
+                Glx::Restarted { exit_code } => {
+                    log_line(&format!(
+                        "Wine settings window: OpenGL through GLX (UseEGL=N); \
+                         the restarted launcher exited with {exit_code}"
+                    ));
+                    return Ok(exit_code);
+                }
+                Glx::Ready {
+                    instance: guard,
+                    warning,
+                } => {
+                    _held = guard;
+                    if let Some(warning) = warning {
+                        log_line(&format!("warning: {warning}"));
+                    }
                 }
             }
             let saved = cfg::read_file(&settings_path).ok().flatten();
