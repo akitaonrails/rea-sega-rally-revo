@@ -34,6 +34,7 @@ mod app {
     use rea_launcher::ini::Owned;
     use rea_launcher::log::Log;
     use rea_launcher::{cfg, download, fsx, paths};
+    use rea_launcher_win32::instance::Window;
     use rea_launcher_win32::reg::Key;
     use rea_launcher_win32::report::{self, Mode};
     use rea_launcher_win32::{disk, display as screen, gpu, http, wine, xinput};
@@ -237,21 +238,16 @@ mod app {
             match rea_launcher_win32::instance::single(instance::NAME) {
                 Ok(guard) => Some(guard),
                 Err(running) => {
-                    let window =
-                        rea_launcher_win32::instance::Window::Title(instance::WINDOW_TITLE);
-                    let second = instance::Second::of(
-                        instance::is_action(&cli.switches),
-                        || running.is_window_found(window),
-                        || running.bring_to_front(window),
-                    );
-                    log_line(&format!("another launcher is running: {second:?}"));
-                    match second.message() {
+                    let action = instance::is_action(&cli.switches);
+                    let second = running.second_start(action, Window::Own(instance::WINDOW_TITLE));
+                    log_line(second.log_line());
+                    match instance::message(second) {
                         // An action's outcome goes where its output goes.
-                        Some(message) if instance::is_action(&cli.switches) => command(message),
-                        Some(message) => play_note(message),
+                        Some(message) if action => command(&message),
+                        Some(message) => play_note(&message),
                         None => {}
                     }
-                    return Ok(second.exit_code());
+                    return Ok(second.exit_code() as u32);
                 }
             }
         } else {
