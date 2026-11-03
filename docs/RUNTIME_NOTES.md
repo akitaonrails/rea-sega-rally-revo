@@ -481,6 +481,27 @@ registry round trip (ours written, the player's value kept, ours taken
 back) is covered by `tests/wine_app_overrides.rs` under
 `sdk/scripts/wine-test`.
 
+## Unreleased — rea-launcher-sdk v0.4.1 (needs real-game checks)
+
+Behaviour that changed with the bump and needs the real game, headless as
+in the verification pass above:
+
+- Each look (Modern, Original 2007, Steam Deck) still reaches the game.
+- A Play-time error under srr-play (`--no-window --linux`, e.g. an
+  unknown game folder) shows a dialog (`report::audience`); `--check
+  --linux` and `--settings --linux` show none.
+- A second launcher start while the game runs: refused, exit 5, one game
+  (`instance::SecondStart`, `Window::Own`); log `second start: … refused`.
+- A launcher start while the copy's game runs without its launcher
+  (killed): refused before the sync, exit 5 (`process::find_running`).
+- A second `srr-play --play` while the game runs: exit 5 now (was 0).
+- Fresh prefix: the settings window opens on the first start
+  (`gpu::prefer_glx_or_restart` runs the launcher once more).
+- Quit paths leave nothing behind: the game's Quit, a close request /
+  Alt+F4, `srr-play stop`, SIGINT/SIGTERM to srr-play.
+- launcher.log names per-exe DLL overrides kept as not ours
+  (`Applied::matching`) on a prefix that v0.2.0 set up.
+
 ## 2026-11-02 — the clean-room stutter fix (integration)
 
 `patches::PACER` is now the clean-room set (`crates/srr-launcher/src/pacer.rs`,

@@ -35,6 +35,7 @@ cargo deny check
 cargo build --release --locked --target i686-pc-windows-gnu
 sdk/packaging/check-imports.sh target/i686-pc-windows-gnu/release/SRRLauncher.exe
 sdk/scripts/wine-test --locked --workspace     # Windows-target tests under Wine, headless
+sdk/scripts/launcher-check                     # family rules; waivers in .rea-check-waivers
 ```
 
 MinGW, lld and Wine may live in the `gaming` distrobox: run the last three
