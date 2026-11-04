@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.3.2 - 2026-11-03
+
 From a test of the Windows build on a native Windows 10 by an outside
 tester (rea-launcher-sdk#1).
 
