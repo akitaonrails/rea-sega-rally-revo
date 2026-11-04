@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+From a test of the Windows build on a native Windows 10 by an outside
+tester (rea-launcher-sdk#1).
+
+- Updated rea-launcher-sdk to v0.4.2.
+- **A typo on the command line no longer waits for OK.** An unknown
+  option or a bad value (`--bogus-flag`, `--look invalid`) started from
+  PowerShell opened a message box and the launcher waited until you
+  pressed OK. It now prints the problem and the list of options to the
+  terminal (a message box only when there is no terminal to see it) and
+  exits with code 2, like the other rea launchers; it used to exit 1.
+  `--settings` with other options counts as such a typo too.
+- **`--setup` and `--check` with the settings window open say so.**
+  `--setup` used to bring the window forward and exit 0 without doing
+  anything; `--check` ran next to the window. Both now say "The Sega
+  Rally Revo launcher window is open. Use it there, or close it and try
+  again." and exit with code 5, like `--download-directx`. They are also
+  refused while the game runs.
+- The README says how to start the unsigned launcher past Windows'
+  SmartScreen ("Windows protected your PC": More info, Run anyway), and
+  lists every registry entry the launcher writes, including the
+  high-performance GPU choice for the game on Windows, with how to remove
+  it.
+- A weekly check tells the maintainers when DXVK has a new release.
+
 ## v0.3.1 - 2026-11-03
 
 - **The README lists the game's keyboard keys.** They come from the game's
