@@ -236,7 +236,9 @@ The launcher's switches:
 `--help`, `--check` and errors print to the terminal you started the
 launcher from, or show a message box when there is none. Exit codes for
 scripts: after a game, the game's own exit code; 1 for an error or when
-`--check` found a problem; with
+`--check` found a problem; 2 for a command line the launcher can't read
+(an unknown option or a bad value: it prints the problem and `--help`'s
+list, and shows no message box when you started it from a terminal); with
 `--settings`, 0 Play pressed, 3 closed without Play, 4 no window possible;
 5 the game is already running (another launcher is running it, or it
 is still running from the launcher's copy).

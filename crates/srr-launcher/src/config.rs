@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use rea_launcher_win32::report::Run;
+use rea_launcher_win32::report::{self, Run};
 
 use rea_launcher::cfg::{
     self, ArgError, KeyStyle, Rejected, Resolution,
@@ -400,13 +400,61 @@ impl Cli {
     }
 }
 
+/// A command line that runs nothing: `--help`, or one the launcher can't
+/// use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Stop {
+    /// `--help`: the usage; exit 0.
+    Help(String),
+    /// An unknown flag, a bad value, or `--settings` with options: the
+    /// error and the usage; exit `report::BAD_COMMAND_LINE` (2).
+    Bad(String),
+}
+
+impl Stop {
+    /// What the run prints (or shows, when nobody sees a terminal).
+    pub fn text(&self) -> &str {
+        match self {
+            Stop::Help(text) | Stop::Bad(text) => text,
+        }
+    }
+
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Stop::Help(_) => 0,
+            Stop::Bad(_) => report::BAD_COMMAND_LINE,
+        }
+    }
+}
+
+/// The launcher's command line (`args`, program name excluded), or why it
+/// runs nothing. `--settings` opens the window and takes no other options.
+pub fn command_line(args: &[String]) -> Result<Cli, Stop> {
+    let cli = Settings::parse_args(args.iter().cloned()).map_err(|text| {
+        if text == usage() {
+            Stop::Help(text)
+        } else {
+            Stop::Bad(text)
+        }
+    })?;
+    if cli.has("--settings") && cli.options_given() {
+        return Err(Stop::Bad(format!(
+            "--settings opens the window and takes no other options; save them in the \
+             window or launcher.cfg\n\n{}",
+            usage()
+        )));
+    }
+    Ok(cli)
+}
+
 /// The kind of run `args` (program name excluded) ask for: from the
-/// parsed command line, or, when it doesn't parse (`--help`, a bad flag),
-/// from the flags it holds (`Run::from_args`).
+/// parsed command line, or, when it runs nothing (`--help`, a bad flag),
+/// a command that knows its flags (`Run::bad_command_line`), so a typo
+/// is printed rather than shown in a play run's modal box.
 pub fn run_kind(args: &[String]) -> Run {
-    match Settings::parse_args(args.iter().cloned()) {
+    match command_line(args) {
         Ok(cli) => cli.run(),
-        Err(_) => Run::from_args(args, COMMANDS),
+        Err(_) => Run::bad_command_line(args),
     }
 }
 
@@ -845,13 +893,66 @@ mod tests {
         );
         // --setup prepares a game run.
         assert_eq!(mode(&["--setup", "--no-window"], false), play(false));
-        // A bad command line still knows its flags.
+        // A bad command line is a command that still knows its flags:
+        // srr-play reads it from the log.
         assert_eq!(
             mode(&["--bogus", "--no-window", "--linux"], true),
-            play(true)
+            command(false)
         );
         assert_eq!(mode(&["--check", "--vsync=maybe"], false), command(true));
         // A value spelled like a flag is a value once the line parses.
         assert_eq!(mode(&["--game", "--check"], false), play(true));
+    }
+
+    /// A typo is reported like a command and exits 2, so a script never
+    /// waits on a modal box (rea-launcher-sdk#1, Windows 10: SRRLauncher
+    /// `--bogus-flag` from PowerShell showed a box and exited 1).
+    #[test]
+    fn a_bad_command_line_is_printed_and_exits_2() {
+        use rea_launcher_win32::report::{Audience, BAD_COMMAND_LINE, Mode};
+        let line = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        for bad in [
+            &["--bogus-flag"][..],
+            &["--look", "invalid"],
+            &["--resolution", "abc"],
+            &["--vsync", "maybe"],
+            &["--check", "--game", r"D:\x", "--look", "invalid"],
+            &["--no-window", "--bogus-flag"],
+            &["--settings", "--quality", "high"],
+        ] {
+            let args = line(bad);
+            let stop = command_line(&args).unwrap_err();
+            assert!(matches!(stop, Stop::Bad(_)), "{bad:?}: {stop:?}");
+            assert_eq!(stop.exit_code(), BAD_COMMAND_LINE, "{bad:?}");
+            assert!(stop.text().contains("SRRLauncher [options]"), "{bad:?}");
+            // From a terminal on Windows: printed, never a play run's box.
+            assert!(
+                matches!(
+                    Audience::of(run_kind(&args), false).mode(),
+                    Mode::Command { .. }
+                ),
+                "{bad:?}"
+            );
+        }
+        // A shortcut with a typo: nobody sees a terminal, so a dialog may show.
+        assert_eq!(
+            Audience::of(run_kind(&line(&["--bogus-flag"])), false).mode(),
+            Mode::Command { interactive: true }
+        );
+        // A script (--no-window on Windows) and srr-play: never a dialog.
+        assert_eq!(
+            Audience::of(run_kind(&line(&["--no-window", "--bogus"])), false).mode(),
+            Mode::Command { interactive: false }
+        );
+        assert_eq!(
+            Audience::of(run_kind(&line(&["--linux", "--bogus"])), true).mode(),
+            Mode::Command { interactive: false }
+        );
+        // --help is the usage and exit 0.
+        let help = command_line(&line(&["--help"])).unwrap_err();
+        assert_eq!((help.text(), help.exit_code()), (usage().as_str(), 0));
+        // A good line still parses; --settings with switches is fine.
+        assert!(command_line(&line(&["--settings", "--linux"])).is_ok());
+        assert!(command_line(&line(&["--look", "original", "--no-window"])).is_ok());
     }
 }

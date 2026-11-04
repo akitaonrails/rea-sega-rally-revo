@@ -133,7 +133,8 @@ mod tests {
 
     #[test]
     fn the_exit_code_is_not_one_the_launcher_already_uses() {
-        // 1 error/--check refusal, 2 not Windows, 3 window closed, 4 no window.
+        // 1 error/--check refusal, 2 bad command line (or not Windows),
+        // 3 window closed, 4 no window.
         assert_eq!(ALREADY_RUNNING, 5);
     }
 }

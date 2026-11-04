@@ -225,13 +225,22 @@ mod app {
         let settings_path = settings_path();
         // Validated up front, so a typo is reported even when the window
         // opens instead of playing.
-        let cli = match Settings::parse_args(std::env::args().skip(1)) {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        let cli = match config::command_line(&args) {
             Ok(cli) => cli,
-            Err(message) if message == config::usage() => {
-                command(&message);
+            Err(help @ config::Stop::Help(_)) => {
+                command(help.text());
                 return Ok(0);
             }
-            Err(message) => return Err(message),
+            // A typo is printed like a command, never a play run's modal
+            // box a script would wait on, and exits 2 (SDK v0.4.2).
+            Err(bad) => {
+                let text = bad.text();
+                log_line(&format!("error: {}", text.lines().next().unwrap_or(text)));
+                let mode = report::audience(report::Run::bad_command_line(&args)).mode();
+                report::fatal(TITLE, text, mode);
+                return Ok(report::BAD_COMMAND_LINE as u32);
+            }
         };
         // One launcher at a time, held until the game exits (`_held` lives
         // to the end of `run`): a second start brings the window forward
@@ -262,13 +271,6 @@ mod app {
         let setup_only = cli.has("--setup");
         if cli.has("--download-directx") {
             return download_directx();
-        }
-        if settings_only && cli.options_given() {
-            return Err(
-                "--settings opens the window and takes no other options; save them in the \
-                 window or launcher.cfg"
-                    .to_string(),
-            );
         }
         // Before any window or game: the settings window's pad navigation
         // and the game both read XInput through Wine's bus.
