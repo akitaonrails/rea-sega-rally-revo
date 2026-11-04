@@ -75,6 +75,9 @@ Download from the [latest release](https://github.com/akitaonrails/rea-sega-rall
 1. Unzip `SRRLauncher-<version>.zip` anywhere outside the game folder.
 2. Run `SRRLauncher.exe`.
 
+The launcher is not signed, so the first start from a downloaded zip may
+show "Windows protected your PC": click *More info*, then *Run anyway*.
+
 ### Steam Deck
 
 1. In Desktop Mode, keep the AppImage somewhere in your home folder and
@@ -267,9 +270,17 @@ Steam's `compatdata/<appid>/pfx` prefix.
 
 The launcher creates the saves only when they are missing and never
 deletes them. In an existing `config.ini` it leaves the audio and
-controller settings alone. It writes the game's registry key
-`HKLM\SOFTWARE\WOW6432Node\Sega\SEGA Rally` (or its VirtualStore copy
-under HKCU) the way the game's installer would.
+controller settings alone.
+
+Registry entries the launcher writes:
+
+| Entry | Where | Why |
+| --- | --- | --- |
+| `HKLM\SOFTWARE\WOW6432Node\Sega\SEGA Rally` (or its VirtualStore copy under HKCU) | Windows, and the Wine prefix | the game's install values, the way its installer writes them |
+| `HKCU\Software\Microsoft\DirectX\UserGpuPreferences`, a value named after the private copy's game exe (`…\SRRLauncher\SegaRally\SEGA Rally_SSE1.exe` or `SEGA Rally.exe`) = `GpuPreference=2;` | Windows only, only when you haven't chosen a GPU for it | the game uses the high-performance GPU |
+| `HKLM\System\CurrentControlSet\Services\winebus` (`DisableHidraw`, `DisableInput`, `Enable SDL`, `Map Controllers`, each only when missing) | the Wine prefix | pads reach the game once, through Wine's SDL bridge |
+| `HKCU\Software\Wine\X11 Driver` `UseEGL = N` (only when missing) | the Wine prefix | the settings window draws through OpenGL GLX |
+| `HKCU\Software\Wine\AppDefaults\<game exe>\DllOverrides`, and the launcher's record of them under `HKCU\Software\rea-launcher\DllOverrides\<game exe>` | the Wine prefix | the bundled DXVK `d3d9.dll` is loaded |
 
 ## Troubleshooting
 
@@ -317,7 +328,10 @@ under HKCU) the way the game's installer would.
    copy of about 4.2 GB, the DirectX 9 files). The registry key
    `HKLM\SOFTWARE\WOW6432Node\Sega\SEGA Rally` (or its VirtualStore copy
    under HKCU) can go too, unless you still play the game without the
-   launcher.
+   launcher. In `HKCU\Software\Microsoft\DirectX\UserGpuPreferences`,
+   delete the value whose name ends in `SRRLauncher\SegaRally\SEGA
+   Rally_SSE1.exe` or `SEGA Rally.exe` (Settings → System → Display →
+   Graphics lists it too).
 4. Linux: after copying the saves out, delete
    `~/.local/share/srr-launcher` (the Wine prefix, with the private copy)
    and `~/.config/srr-launcher`. With Proton, removing the Steam shortcut
