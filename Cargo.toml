@@ -10,9 +10,9 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 # The shared launcher SDK. To move to a new release, change the tag here and
 # rerun `scripts/sdk-sync` from that SDK checkout (see AGENTS.md).
-rea-launcher = { git = "https://github.com/akitaonrails/rea-launcher-sdk", tag = "v0.4.1" }
-rea-launcher-win32 = { git = "https://github.com/akitaonrails/rea-launcher-sdk", tag = "v0.4.1" }
-rea-launcher-ui = { git = "https://github.com/akitaonrails/rea-launcher-sdk", tag = "v0.4.1" }
+rea-launcher = { git = "https://github.com/akitaonrails/rea-launcher-sdk", tag = "v0.4.2" }
+rea-launcher-win32 = { git = "https://github.com/akitaonrails/rea-launcher-sdk", tag = "v0.4.2" }
+rea-launcher-ui = { git = "https://github.com/akitaonrails/rea-launcher-sdk", tag = "v0.4.2" }
 
 [profile.release]
 panic = "abort"
