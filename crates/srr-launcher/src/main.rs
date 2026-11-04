@@ -243,26 +243,22 @@ mod app {
             }
         };
         // One launcher at a time, held until the game exits (`_held` lives
-        // to the end of `run`): a second start brings the window forward
-        // or refuses to play.
-        let mut _held = if instance::needs_instance(&cli.switches) {
-            match rea_launcher_win32::instance::single(instance::NAME) {
-                Ok(guard) => Some(guard),
-                Err(running) => {
-                    let action = instance::is_action(&cli.switches);
-                    let second = running.second_start(action, Window::Own(instance::WINDOW_TITLE));
-                    log_line(second.log_line());
-                    match instance::message(second) {
-                        // An action's outcome goes where its output goes.
-                        Some(message) if action => command(&message),
-                        Some(message) => play_note(&message),
-                        None => {}
-                    }
-                    return Ok(second.exit_code() as u32);
+        // to the end of `run`), `--check` included: a second start brings
+        // the window forward, or refuses an action or Play with exit 5.
+        let mut _held = match rea_launcher_win32::instance::single(instance::NAME) {
+            Ok(guard) => Some(guard),
+            Err(running) => {
+                let action = instance::is_action(&cli.switches);
+                let second = running.second_start(action, Window::Own(instance::WINDOW_TITLE));
+                log_line(second.log_line());
+                match instance::message(second, &cli.switches) {
+                    // An action's outcome goes where its output goes.
+                    Some(message) if action => command(&message),
+                    Some(message) => play_note(&message),
+                    None => {}
                 }
+                return Ok(second.exit_code() as u32);
             }
-        } else {
-            None
         };
         let settings_only = cli.has("--settings");
         let linux = cli.has("--linux");
@@ -391,7 +387,7 @@ mod app {
                 refused.log_line(),
                 runtime_dir.display()
             ));
-            if let Some(message) = instance::message(refused) {
+            if let Some(message) = instance::message(refused, &cli.switches) {
                 play_note(&message);
             }
             return Ok(refused.exit_code() as u32);

@@ -230,6 +230,9 @@ The launcher's switches:
 - `--download-directx`: download Microsoft's DirectX 9 files, then exit.
   With the settings window open it exits with code 5 and tells you to use
   the window's Download button.
+- `--check`, `--setup` and `--download-directx` don't run while the
+  settings window is open or the game runs: they say so and exit with
+  code 5.
 - `--linux`: set by `srr-play` and the AppImage.
 - `--help`: list every option.
 
@@ -241,7 +244,8 @@ scripts: after a game, the game's own exit code; 1 for an error or when
 list, and shows no message box when you started it from a terminal); with
 `--settings`, 0 Play pressed, 3 closed without Play, 4 no window possible;
 5 the game is already running (another launcher is running it, or it
-is still running from the launcher's copy).
+is still running from the launcher's copy), or `--check`, `--setup` or
+`--download-directx` found the settings window open.
 
 The game always runs fullscreen. Under Wine that fullscreen is its own
 Wine desktop, a window of the chosen size on your desktop.
