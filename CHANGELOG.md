@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Updated rea-launcher-sdk to v0.4.3.
+- **`SRRLauncher.exe` now says what it is.** It carries its name, version,
+  publisher and the launcher's icon (in Explorer's Properties too), so
+  antivirus programs are less likely to flag it as an unknown program.
+
 ## v0.3.2 - 2026-11-03
 
 From a test of the Windows build on a native Windows 10 by an outside
