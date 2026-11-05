@@ -19,6 +19,11 @@ rea-launcher-win32.workspace = true
 # Takes the D3DX9 DLLs out of Microsoft's DirectX package (MIT).
 cab = "0.6"
 
+# Version information, the icon and a manifest in SRRLauncher.exe (build.rs),
+# so antivirus programs see a named, versioned program.
+[build-dependencies]
+rea-launcher-build.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 rea-launcher-ui.workspace = true
 
