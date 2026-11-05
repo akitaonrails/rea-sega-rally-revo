@@ -2255,7 +2255,7 @@ dependencies = [
 
 [[package]]
 name = "srr-launcher"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "cab",
  "iced-x86",

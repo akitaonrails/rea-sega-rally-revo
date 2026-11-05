@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.3.3 - 2026-11-05
+
 - Updated rea-launcher-sdk to v0.4.3.
 - **`SRRLauncher.exe` now says what it is.** It carries its name, version,
   publisher and the launcher's icon (in Explorer's Properties too), so
