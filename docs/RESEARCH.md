@@ -218,12 +218,51 @@ A player asked to change the keyboard keys. What is established:
   live input object, and not stored as characters. Driving reads keys
   through small binding objects (key at `+0xC`, e.g. thunk 0x414EA0); the
   code that creates them, and so the key source, is not found yet.
+- Not in the data files either (checked 2026-11-05):
+  `Control/control_data.sbf` holds neither the manual's DIK sequence
+  (A Z , . Space S X LCtrl Tab O P = `1E 2C 33 34 39 1F 2D 1D 0F 18 19`)
+  packed nor as 16-bit words.
 
 Paused by owner decision on 2026-11-03; issue #1 stays open as a feature
 request. To resume: find the binding objects' constructors (or break on
 0x578160 in a race and walk back from the caller), then decide between
 patching the key source in the private copy and a launcher option.
 Nothing ships until a changed key is seen to work in a race.
+
+## Pad rumble (issue #2, 2026-11-05)
+
+A player asked for a way to disable rumble. What the game does, verified
+in the clean `SEGA Rally_SSE1.exe` and the game's own settings tool
+(`SEGARallyLauncher.exe`, decompiled with ilspycmd):
+
+- The game's pad vibration is **config-driven**, not hardcoded. Its
+  settings tool writes `[GameController] Mapping` as
+  `version(4) const(4) layout(4) allow-vibration(4) GUID(36)
+  dinput-feedback(4)` plus eleven 4-hex button bindings — 100 characters
+  (`c_controllerMapStringLength`; the tool's "Allow vibration" checkbox,
+  default **on**, is field 4, chars `[12..16]`).
+- The game parses the same string at startup: `0x589cd0` reads
+  `[GameController] Mapping` (string table `0x6cb094`, source
+  `Sega_LL_Input_Manager.cpp`) into a 0x30-byte struct stored at
+  `0xA13450` (the input manager at `0xA13420`, set up by `0x58a310`).
+- The rumble dispatcher copies that struct to `0x785af4` (`0x66e2b3`,
+  once, latched at `0x9502c8`) and **extracts the allow-vibration word
+  with `shr edx, 0x10` of the dword at `+4`** (`0x66e2f8`): when the flag
+  is 0 it calls `0x58b370`, which sends the controller object's
+  "set force-feedback output to zero" vtable call (`[vt+0x44](player,
+  0)`); when it is 1 the normal effect path runs.
+- The effects themselves are DirectInput 8 force feedback
+  (`DINPUT8.dll` import; `CreateEffect` with the ConstantForce, Square
+  and Ramp GUIDs at `0x6a2b48`/`0x6a2b38`/`0x6a2b28`). `XINPUT1_3.dll`
+  is imported by ordinal but its thunks are never called — vestigial.
+
+So the launcher's `rumble` option rewrites only chars `[12..16]` of the
+player's existing `Mapping` (version- and length-checked; a mapping in
+any other format is left untouched), preserving the pad GUID and the
+eleven bindings, with the SDK `Owned` release semantics when the option
+goes back to unset. Verified statically end to end; the one live check —
+a race with a pad after the flip — still needs a pad connected to the
+test box (none was, 2026-11-05).
 
 ## Community fixes: licence and maintenance
 

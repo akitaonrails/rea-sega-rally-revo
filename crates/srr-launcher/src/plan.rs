@@ -50,6 +50,9 @@ pub struct Plan {
     pub seed: ((u32, u32), Quality, bool),
     /// The `config.ini` options set in `launcher.cfg`.
     pub graphics: Graphics,
+    /// The pad-vibration switch set in `launcher.cfg` (`None`: the
+    /// game's own value stays).
+    pub rumble: Option<bool>,
     pub registry: Vec<RegValue>,
     /// `dxvk.conf` in the private copy (any DXVK reads it: ours or Proton's).
     pub dxvk_conf: Option<String>,
@@ -138,6 +141,12 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
         patches.push((name, sets));
     }
 
+    if let Some(on) = settings.rumble {
+        notes.push(format!(
+            "rumble: {} (the game's controller string, the pad's own settings are kept)",
+            if on { "on" } else { "off" }
+        ));
+    }
     let registry = gamecfg::registry_values(&env.runtime, settings.language.as_deref());
     let dxvk = env.linux || env.wine;
     let dxvk_conf = dxvk.then(|| gamecfg::dxvk_conf(settings.effective_frame_limit().fps()));
@@ -185,6 +194,7 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
         aspect,
         seed,
         graphics,
+        rumble: settings.rumble,
         registry,
         dxvk_conf,
         install_dxvk: env.linux,
@@ -485,6 +495,10 @@ mod tests {
             }),
             ("stutter_fix", &["--stutter-fix", "off"], |p, _| {
                 p.launch == MAIN_EXE
+            }),
+            ("rumble", &["--rumble", "off"], |p, _| {
+                p.rumble == Some(false)
+                    && p.notes.iter().any(|note| note.starts_with("rumble: off"))
             }),
             ("language", &["--language", "german"], |p, _| {
                 p.registry

@@ -144,8 +144,9 @@ the button.
 the menu language and the DirectX 9 download. **Picture** has the
 resolution (with the size and aspect the game will run at), the quality
 and vsync; changing any of them turns the look into **Custom**.
-**Controls** shows the connected Xbox-style pads and has a **Test rumble**
-button, which only checks that the pad accepts rumble.
+**Controls** shows the connected Xbox-style pads, the pad-rumble switch
+and a **Test rumble** button, which only checks that the pad accepts
+rumble.
 
 | Look | Resolution | Quality | Vsync | When to pick it |
 | --- | --- | --- | --- | --- |
@@ -167,8 +168,11 @@ the keyboard. Switch the pad to X-input mode and bind it once in the
 game's own Controls menu. On Linux the launcher sets up Wine's controller
 support for this game.
 
-Keep the game's force feedback **off**: it is a known crash (reported on
-Windows 10) and adds nothing.
+The game vibrates the pad in races — that is its own default. The
+**pad rumble** switch writes the game's vibration setting (off if the
+rumble annoys you); your pad and its bindings are kept. Windows 10 crash
+reports exist for the 2007 settings tool's force-feedback box, so turn
+rumble off if the game crashes with it on.
 
 ## Keyboard
 
@@ -206,6 +210,7 @@ commented `launcher.cfg` listing every option.
 | `runtime` / `--runtime` | — (file and flag only) | a folder outside the game folder | `%LOCALAPPDATA%\SRRLauncher\SegaRally` | Where the launcher keeps its private copy of the game. |
 | `look` / `--look` | Play: Look | `modern`, `steam-deck`, `original`, `custom` | the recommended look | A ready-made picture. On the command line it sets that look's resolution, quality and vsync for one run; other options still win. |
 | `stutter_fix` / `--stutter-fix` | Play: Stutter fix | `on`, `off` | on | Fixes the microstutter in every race and the judder from Championship stage 2. Needs the clean `SEGA Rally_SSE1.exe`; without it the game runs from `SEGA Rally.exe` and your choice is kept for later. |
+| `rumble` / `--rumble` | Controls: Pad rumble | `on`, `off` | the game's (on) | Whether the game vibrates the pad in races. Writes the game's own vibration switch inside the controller string; the pad, its GUID and bindings are kept as they are. |
 | `frame_limit` / `--frame-limit` | Play: Frame limit | `60`, `120`, `off` | 60 | The highest frame rate under Linux, Wine or Proton (through DXVK). On native Windows the game follows vsync and the control is greyed out. |
 | `language` / `--language` | Play: Language | `English`, `French`, `German`, `Spanish`, `Italian`, `Polish` | the game's (English when it has none) | The language of the game's menus. |
 | `resolution` / `--resolution` | Picture: Resolution | `auto` or `WIDTHxHEIGHT` | the game's (your screen on a first run) | The game's screen size; `auto` uses your screen. Ultra-wide sizes (21:9 such as 3440×1440, 32:9 such as 5120×1440) get the aspect fix so the picture isn't stretched. |

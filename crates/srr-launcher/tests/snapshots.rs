@@ -158,16 +158,23 @@ fn render(
         None => Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
     };
     let mut owned = Owned::default();
-    let config = gamecfg::next_config(read, plan.seed, &plan.graphics, &mut owned).unwrap();
+    let (config, rumble) =
+        gamecfg::next_config(read, plan.seed, &plan.graphics, plan.rumble, &mut owned).unwrap();
     writeln!(
         w,
-        "## config.ini ({})\n{}",
+        "## config.ini ({}){}\n{}",
         if existing.is_some() {
             "updated over the player's file"
         } else {
             "seeded"
         },
-        String::from_utf8(config).unwrap().replace("\r\n", "\\r\n")
+        match rumble {
+            Some(gamecfg::RumbleEdit::Written) => ", rumble written",
+            Some(gamecfg::RumbleEdit::Seeded) => ", rumble seeded",
+            Some(gamecfg::RumbleEdit::Foreign) => ", rumble: foreign mapping left alone",
+            None => "",
+        },
+        String::from_utf8(config).unwrap().replace('\r', "\\r")
     )
     .unwrap();
     out

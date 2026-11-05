@@ -590,3 +590,28 @@ Still for a person (not automatable headless):
    lap times within ±1 frame.
 5. A real 60-Hz display with vsync: the 16–17 ms ≥ 99 % row.
 6. Quit to the menu, a new Quick Race, quit the game: clean exit, no hang.
+
+## 2026-11-05 — the rumble switch (issue #2)
+
+Verified statically, end to end, on the clean `SEGA Rally_SSE1.exe`
+(addresses in `docs/RESEARCH.md`, "Pad rumble"): the game parses
+`[GameController] Mapping` at `0x589cd0`, keeps it at `0xA13450`, and its
+rumble dispatcher (`0x66e2f8`) extracts the allow-vibration word and
+gates the zero-output call `0x58b370` on it. The decompiled settings tool
+confirms the field layout and the default (vibration on). The option's
+edit is golden-tested (`gamecfg::tests::rumble_*`, plan end-to-end case,
+snapshots: Written, Seeded and Foreign paths).
+
+Verified live under Wine (sandbox: a two-exe game folder in /tmp, a
+throwaway prefix, the freshly built `SRRLauncher.exe --setup`):
+`--rumble off` seeds `Mapping` with the vibration field `0000` and the
+owned record notes the previous value; the next `--setup` without the
+option releases it and `Mapping` is back to `0001` with an empty owned
+record. The log lines (`rumble: off …`, `config.ini: … rumble written`)
+landed as designed.
+
+Still to feel: no pad was connected to this box on 2026-11-05, so the
+flip has not been *felt* in a race. First run with a pad: confirm the
+pad is silent with `rumble = off` and rumbles with `on`, and note it
+here.
+

@@ -29,6 +29,9 @@ Settings {
     stutter_fix: Some(
         true,
     ),
+    rumble: Some(
+        true,
+    ),
     language: Some(
         "English",
     ),
@@ -62,7 +65,9 @@ app DLL overrides (AppDefaults\<exe>\DllOverrides = native,builtin): []
 app DLL overrides taken back: []
 install DXVK d3d9.dll: false
 Windows GPU preference: true
-notes: []
+notes: [
+    "rumble: on (the game's controller string, the pad's own settings are kept)",
+]
 
 ## patches
 SEGA Rally.exe: pristine
@@ -87,7 +92,7 @@ language = "English"
 ## dxvk.conf
 (not written)
 
-## config.ini (updated over the player's file)
+## config.ini (updated over the player's file), rumble: foreign mapping left alone
 [Audio]\r
 DriverGUID=00000000-0000-0000-0000-000000000000\r
 Quality=2\r

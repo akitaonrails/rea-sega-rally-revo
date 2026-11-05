@@ -562,14 +562,18 @@ impl Window {
             "Switch the pad to X-input mode and set it up in the game's own Controls menu. \
              On Linux the launcher prepares Wine's controller support for this game.",
         );
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(
-                "Leave force feedback off in the game's controller options: it is a known \
-                 crash (reported on Windows 10) and is not needed to play.",
-            )
-            .font(body(13.0))
-            .color(ORANGE),
+        ui.add_space(12.0);
+
+        widgets::heading(ui, "Rumble");
+        if let Some(text) = table_row(ui, "rumble", cfg::on_off(self.form.rumble), None) {
+            self.form.rumble = text == cfg::on_off(true);
+        }
+        widgets::note(
+            ui,
+            "Off writes the game's own vibration switch into the controller string; \
+             your pad and its bindings are kept. Windows 10 crash reports exist for the \
+             2007 settings tool's force-feedback box: if the game crashes with rumble on, \
+             turn this off.",
         );
         ui.add_space(8.0);
         if widgets::outline_button(ui, "Test rumble").clicked() {
@@ -577,9 +581,7 @@ impl Window {
             self.rumble_test = Some(if took == 0 {
                 "No pad accepted rumble. Check the pad connection and X-input mode.".to_string()
             } else {
-                "Sent for half a second: the pad accepts rumble. This only tests the pad; \
-                 keep in-game force feedback off."
-                    .to_string()
+                "Sent for half a second: the pad accepts rumble.".to_string()
             });
         }
         if let Some(result) = &self.rumble_test {

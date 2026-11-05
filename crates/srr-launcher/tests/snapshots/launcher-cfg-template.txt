@@ -44,6 +44,11 @@
 # Values: on or off.
 #stutter_fix =
 
+# The game vibrates the pad in races (its own default). Off writes the
+# game's vibration switch; your pad bindings are kept.
+# Values: on or off.
+#rumble =
+
 # The language of the game's menus.
 # Values: English, French, German, Spanish, Italian or Polish.
 #language =

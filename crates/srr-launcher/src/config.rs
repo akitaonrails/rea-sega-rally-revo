@@ -259,6 +259,12 @@ pub const OPTIONS: &[OptionSpec] = &[
     )
     .with_aliases(&["stutter-fix"]),
     OptionSpec::new(
+        "rumble",
+        Kind::Toggle,
+        "Pad rumble",
+        "The game vibrates the pad in races (its own default). Off writes the game's vibration switch; your pad bindings are kept.",
+    ),
+    OptionSpec::new(
         "language",
         Kind::Choice(LANGUAGE_CHOICES),
         "Language",
@@ -362,6 +368,7 @@ pub struct Settings {
     pub vsync: Option<bool>,
     pub frame_limit: Option<FrameLimit>,
     pub stutter_fix: Option<bool>,
+    pub rumble: Option<bool>,
     pub language: Option<String>,
 }
 
@@ -473,6 +480,7 @@ impl Settings {
             ("vsync", Value::Toggle(on)) => self.vsync = Some(on),
             ("frame_limit", Value::Choice(limit)) => self.frame_limit = FrameLimit::parse(limit),
             ("stutter_fix", Value::Toggle(on)) => self.stutter_fix = Some(on),
+            ("rumble", Value::Toggle(on)) => self.rumble = Some(on),
             ("language", Value::Choice(language)) => self.language = Some(language.to_string()),
             _ => return Err(Rejected::Unknown),
         }
@@ -522,6 +530,7 @@ impl Settings {
             vsync: over.vsync.or(base.vsync),
             frame_limit: over.frame_limit.or(base.frame_limit),
             stutter_fix: over.stutter_fix.or(base.stutter_fix),
+            rumble: over.rumble.or(base.rumble),
             language: over.language.or(base.language),
         }
     }
@@ -546,6 +555,11 @@ impl Settings {
 
     pub fn effective_stutter_fix(&self) -> bool {
         self.stutter_fix.unwrap_or(true)
+    }
+
+    /// The pad-vibration choice: unset keeps the game's own value.
+    pub fn effective_rumble(&self) -> bool {
+        self.rumble.unwrap_or(true)
     }
 
     pub fn effective_language(&self) -> &str {

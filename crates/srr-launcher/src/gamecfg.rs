@@ -8,9 +8,13 @@
 //! (resolution, quality, vsync), and records them (`ini::Owned`): when an
 //! option goes back to unset, a key is restored only while it still holds
 //! the launcher's value, so a choice made in the game's own menu stays.
-//! `[Audio]`, `[GameController]` (the controller GUID and mapping),
-//! comments and unknown keys are kept byte for byte, in any encoding (the
-//! SDK's `ini` module). The caller replaces the real file atomically.
+//! `[Audio]`, comments and unknown keys are kept byte for byte, in any
+//! encoding (the SDK's `ini` module). The `rumble` option owns exactly
+//! one field of `[GameController] Mapping` — the pad-vibration switch the
+//! game's own settings tool also writes — and leaves every other
+//! character of the player's mapping (pad GUID, layout, the eleven button
+//! bindings) untouched, with the same `Owned` release semantics. The
+//! caller replaces the real file atomically.
 
 use rea_launcher::ini::{self, Ini, Owned};
 use rea_launcher::wine;
@@ -101,11 +105,77 @@ pub fn seed_config(resolution: (u32, u32), quality: Quality, vsync: bool) -> Str
          \n\
          [GameController]\n\
          GUID=\n\
-         Mapping=000100010000000100000000-0000-0000-0000-0000000000000000000E000F001200130014000200030017001800010000\n\
+         Mapping={SEED_MAPPING}\n\
          \n\
          [Graphics]\n{}\n",
         graphics.join("\n")
     )
+}
+
+/// The section that holds the controller the game plays with: `GUID` (the
+/// pad's DirectInput instance) and `Mapping`.
+pub const CONTROLLER_SECTION: &str = "GameController";
+
+/// The `Mapping` key inside `[GameController]`.
+pub const MAPPING_KEY: &str = "Mapping";
+
+/// The `[GameController] Mapping` value the game's own settings tool
+/// seeds: version 0001, layout 1, pad vibration on, an empty GUID and
+/// the tool's default button bindings.
+pub const SEED_MAPPING: &str = "000100010000000100000000-0000-0000-0000-0000000000000000000E000F001200130014000200030017001800010000";
+
+/// `Mapping` is 100 characters: `version(4) const(4) layout(4)
+/// allow-vibration(4) GUID(36) dinput-feedback(4)` then eleven 4-hex
+/// button bindings — the format of the game's own settings tool
+/// (`c_controllerMapStringLength`; the game parses the same string at
+/// `0x589cd0` and gates its rumble on field 4, `0x66e2f8`).
+pub const MAPPING_LEN: usize = 100;
+
+/// Chars `[12..16]` of `Mapping`: the pad-vibration switch (`0001` on,
+/// `0000` off), the field the game's own XInput page writes from its
+/// "Allow vibration" checkbox.
+const VIBRATION_RANGE: std::ops::Range<usize> = 12..16;
+
+/// What a rumble write did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RumbleEdit {
+    /// The vibration field was set in the player's existing mapping.
+    Written,
+    /// There was no usable mapping, so the default one was seeded with
+    /// the vibration field.
+    Seeded,
+    /// The mapping is not the known 100-character v0001 format; it was
+    /// left exactly as the player has it.
+    Foreign,
+}
+
+/// The `Mapping` value with the pad-vibration field set to `on`, from the
+/// value currently in `config.ini`. Every other character — the pad GUID,
+/// the layout, the eleven button bindings — is kept exactly as it is.
+pub fn with_rumble(current: Option<&str>, on: bool) -> (String, RumbleEdit) {
+    let flag = if on { "0001" } else { "0000" };
+    let seed = || {
+        let mut out = SEED_MAPPING.to_string();
+        out.replace_range(VIBRATION_RANGE, flag);
+        out
+    };
+    let known = |value: &str| {
+        value.len() == MAPPING_LEN
+            && value[..4].eq_ignore_ascii_case("0001")
+            && value.bytes().enumerate().all(|(i, b)| {
+                // the GUID field is the tool's GUID ToString(): hex with dashes
+                b.is_ascii_hexdigit() || (VIBRATION_RANGE.end..56).contains(&i) && b == b'-'
+            })
+    };
+    match current.map(str::trim) {
+        Some(value) if known(value) => {
+            let mut out = value.to_string();
+            out.replace_range(VIBRATION_RANGE, flag);
+            (out, RumbleEdit::Written)
+        }
+        Some("") | Some("NA") | None => (seed(), RumbleEdit::Seeded),
+        Some(value) => (value.to_string(), RumbleEdit::Foreign),
+    }
 }
 
 /// The picture options as `launcher.cfg` has them: `None` is unset (the
@@ -145,13 +215,17 @@ fn owned_keys(graphics: &Graphics) -> Vec<(&'static str, Option<String>)> {
 /// seeded with `seed` (the effective values); an existing one gets only
 /// the keys of the options in `graphics`, byte for byte otherwise; a file
 /// that cannot be read is the player's and is not replaced (the error
-/// comes back). `owned` is the record of what the launcher wrote.
+/// comes back). `owned` is the record of what the launcher wrote. The
+/// `rumble` option, when set, writes the vibration field of the
+/// `[GameController] Mapping` string the same way; the edit it made comes
+/// back with the bytes.
 pub fn next_config(
     read: std::io::Result<Vec<u8>>,
     seed: ((u32, u32), Quality, bool),
     graphics: &Graphics,
+    rumble: Option<bool>,
     owned: &mut Owned,
-) -> std::io::Result<Vec<u8>> {
+) -> std::io::Result<(Vec<u8>, Option<RumbleEdit>)> {
     let existing = match read {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -168,7 +242,19 @@ pub fn next_config(
             }
         }
     }
-    Ok(ini.to_bytes())
+    let rumble_edit = match rumble {
+        Some(on) => {
+            let current = ini.get(CONTROLLER_SECTION, MAPPING_KEY).map(str::to_owned);
+            let (value, edit) = with_rumble(current.as_deref(), on);
+            ini::set_owned(&mut ini, owned, CONTROLLER_SECTION, MAPPING_KEY, &value);
+            Some(edit)
+        }
+        None => {
+            ini::release(&mut ini, owned, CONTROLLER_SECTION, MAPPING_KEY);
+            None
+        }
+    };
+    Ok((ini.to_bytes(), rumble_edit))
 }
 
 /// The resolution a config.ini holds, if both keys are numbers.
@@ -352,7 +438,14 @@ mod tests {
 
     fn update(existing: &str, graphics: &Graphics, owned: &mut Owned) -> String {
         let seed = ((1920, 1080), Quality::High, true);
-        let out = next_config(Ok(existing.as_bytes().to_vec()), seed, graphics, owned).unwrap();
+        let (out, _) = next_config(
+            Ok(existing.as_bytes().to_vec()),
+            seed,
+            graphics,
+            None,
+            owned,
+        )
+        .unwrap();
         String::from_utf8(out).unwrap()
     }
 
@@ -384,14 +477,16 @@ mod tests {
     #[test]
     fn a_missing_file_is_seeded_complete() {
         let mut owned = Owned::default();
-        let out = next_config(
+        let (out, rumble) = next_config(
             Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
             ((1920, 1080), Quality::Normal, false),
             &Graphics::default(),
+            None,
             &mut owned,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
+        assert!(rumble.is_none());
         assert!(text.starts_with("[Audio]\nDriverGUID="));
         assert!(text.contains("[GameController]\nGUID=\n"));
         assert!(text.contains("[Graphics]\nAdapterOrdinal=0\n"));
@@ -482,10 +577,11 @@ mod tests {
     fn non_utf8_controller_names_survive_byte_for_byte() {
         let existing = b"[GameController]\r\nGUID={1234}\r\nName=Manette \xE9tendue\r\n\r\n[Graphics]\r\nVSync=0\r\n".to_vec();
         let mut owned = Owned::default();
-        let out = next_config(
+        let (out, _) = next_config(
             Ok(existing),
             ((1, 1), Quality::High, true),
             &ALL_SET,
+            None,
             &mut owned,
         )
         .unwrap();
@@ -498,10 +594,11 @@ mod tests {
     #[test]
     fn a_bom_is_kept_and_graphics_still_matches() {
         let mut owned = Owned::default();
-        let out = next_config(
+        let (out, _) = next_config(
             Ok(b"\xEF\xBB\xBF[Graphics]\nVSync=0\n".to_vec()),
             ((1, 1), Quality::High, true),
             &ALL_SET,
+            None,
             &mut owned,
         )
         .unwrap();
@@ -519,9 +616,175 @@ mod tests {
             Err(Error::from(ErrorKind::PermissionDenied)),
             ((1920, 1080), Quality::High, true),
             &ALL_SET,
+            None,
             &mut Owned::default(),
         );
         assert_eq!(denied.unwrap_err().kind(), ErrorKind::PermissionDenied);
+    }
+
+    /// A mapping the way the game writes it once a pad is bound: the
+    /// player's GUID in the middle field.
+    const PAD_MAPPING: &str = "0001000200010001a1b2c3d4-e5f6-0000-0000-00a0b0c0d0e00000000E000F001200130014000200030017001800010000";
+
+    #[test]
+    fn the_seed_mapping_is_the_format_the_game_parses() {
+        assert_eq!(SEED_MAPPING.len(), MAPPING_LEN);
+        assert_eq!(&SEED_MAPPING[..4], "0001");
+        // allow-vibration on, an empty GUID, dinput feedback off
+        assert_eq!(&SEED_MAPPING[12..16], "0001");
+        assert_eq!(
+            &SEED_MAPPING[16..52],
+            "00000000-0000-0000-0000-000000000000"
+        );
+        assert_eq!(&SEED_MAPPING[52..56], "0000");
+        assert_eq!(PAD_MAPPING.len(), MAPPING_LEN);
+    }
+
+    #[test]
+    fn rumble_edits_only_the_vibration_field() {
+        let (value, edit) = with_rumble(Some(PAD_MAPPING), false);
+        assert_eq!(edit, RumbleEdit::Written);
+        assert_eq!(&value[..12], &PAD_MAPPING[..12]);
+        assert_eq!(&value[12..16], "0000");
+        assert_eq!(&value[16..], &PAD_MAPPING[16..]);
+
+        let mut disabled = PAD_MAPPING.to_string();
+        disabled.replace_range(12..16, "0000");
+        let (value, edit) = with_rumble(Some(&disabled), true);
+        assert_eq!(edit, RumbleEdit::Written);
+        assert_eq!(&value[12..16], "0001");
+        assert_eq!(value, PAD_MAPPING);
+    }
+
+    #[test]
+    fn rumble_off_survives_the_player_remapping_their_pad() {
+        // The player binds a new pad in the game while rumble is off:
+        // the write is derived from the current string, so the new GUID
+        // and bindings survive and only the vibration field is ours.
+        let remapped = {
+            let mut m = PAD_MAPPING.to_string();
+            m.replace_range(16..52, "11223344-5566-0000-0000-001122334455");
+            m.replace_range(60..64, "0200");
+            m.replace_range(12..16, "0001"); // the game wrote vibration on
+            m
+        };
+        let (value, edit) = with_rumble(Some(&remapped), false);
+        assert_eq!(edit, RumbleEdit::Written);
+        assert_eq!(&value[16..52], "11223344-5566-0000-0000-001122334455");
+        assert_eq!(&value[60..64], "0200");
+        assert_eq!(&value[12..16], "0000");
+    }
+
+    #[test]
+    fn rumble_seeds_when_there_is_no_mapping() {
+        for current in [None, Some(""), Some("NA")] {
+            let (value, edit) = with_rumble(current, false);
+            assert_eq!(edit, RumbleEdit::Seeded, "{current:?}");
+            assert_eq!(value.len(), MAPPING_LEN);
+            assert_eq!(&value[12..16], "0000");
+        }
+        let (value, edit) = with_rumble(None, true);
+        assert_eq!(edit, RumbleEdit::Seeded);
+        assert_eq!(value, SEED_MAPPING);
+    }
+
+    #[test]
+    fn a_foreign_mapping_is_left_alone() {
+        for current in [
+            "0002FFFF".to_string() + &"0".repeat(MAPPING_LEN - 8), // another version
+            "ABCD".to_string(),                                    // another length
+        ] {
+            let (value, edit) = with_rumble(Some(&current), false);
+            assert_eq!(edit, RumbleEdit::Foreign, "{current}");
+            assert_eq!(value, current);
+        }
+    }
+
+    #[test]
+    fn rumble_flows_through_next_config_and_back() {
+        let seed = ((1920, 1080), Quality::High, true);
+        let player = format!(
+            "[GameController]\nGUID={{abcd}}\nMapping={PAD_MAPPING}\n\n[Graphics]\nVSync=0\n"
+        );
+        let mut owned = Owned::default();
+
+        // off: four characters change, nothing else
+        let (out, edit) = next_config(
+            Ok(player.as_bytes().to_vec()),
+            seed,
+            &Graphics::default(),
+            Some(false),
+            &mut owned,
+        )
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(edit, Some(RumbleEdit::Written));
+        let expected = {
+            let mut m = PAD_MAPPING.to_string();
+            m.replace_range(12..16, "0000");
+            m
+        };
+        assert_eq!(text, player.replace(PAD_MAPPING, &expected));
+        assert!(owned.written(CONTROLLER_SECTION, MAPPING_KEY).is_some());
+
+        // on again from the player's (edited) file: still only that field
+        let (out, edit) = next_config(
+            Ok(text.as_bytes().to_vec()),
+            seed,
+            &Graphics::default(),
+            Some(true),
+            &mut owned,
+        )
+        .unwrap();
+        assert_eq!(edit, Some(RumbleEdit::Written));
+        assert_eq!(String::from_utf8(out.clone()).unwrap(), player);
+
+        // unset: the launcher's value is released, the player's is back
+        let (out, edit) =
+            next_config(Ok(out), seed, &Graphics::default(), None, &mut owned).unwrap();
+        assert!(edit.is_none());
+        assert_eq!(String::from_utf8(out).unwrap(), player);
+        assert!(owned.written(CONTROLLER_SECTION, MAPPING_KEY).is_none());
+    }
+
+    #[test]
+    fn rumble_unset_after_the_player_changed_the_mapping_leaves_it() {
+        let seed = ((1920, 1080), Quality::High, true);
+        let mut owned = Owned::default();
+        let (off, _) = with_rumble(Some(PAD_MAPPING), false);
+        let player_file = format!("[GameController]\nMapping={off}\n\n[Graphics]\nVSync=0\n");
+        // the player rebinds their pad on top of our value
+        let remapped = {
+            let mut m = off.clone();
+            m.replace_range(16..52, "11223344-5566-0000-0000-001122334455");
+            m
+        };
+        let player_file = player_file.replace(&off, &remapped);
+        let (out, _) = next_config(
+            Ok(player_file.as_bytes().to_vec()),
+            seed,
+            &Graphics::default(),
+            None,
+            &mut owned,
+        )
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text, player_file, "the player's mapping is kept as it is");
+        // and setting rumble again edits the player's current string
+        let (out, edit) = next_config(
+            Ok(player_file.as_bytes().to_vec()),
+            seed,
+            &Graphics::default(),
+            Some(false),
+            &mut owned,
+        )
+        .unwrap();
+        assert_eq!(edit, Some(RumbleEdit::Written));
+        assert!(String::from_utf8(out).unwrap().contains(&{
+            let mut m = remapped.clone();
+            m.replace_range(12..16, "0000");
+            m
+        }));
     }
 
     #[test]

@@ -86,9 +86,14 @@ as `distrobox enter gaming -- sh -c 'cd /absolute/path && …'`.
   Everything else is configuration the game reads.
 - `config.ini` is seeded complete only when missing; afterwards only the
   keys of options set in `launcher.cfg` are written (`ini::Owned`). Never
-  rewrite `[Audio]`/`[GameController]`. The save files (`SEGA Rally.dat`,
-  `SR_RANKTABLES.DAT`) are the game's: never seeded, never deleted (only
-  the empty seeds of earlier releases are removed, see the owner decision).
+  rewrite `[Audio]`. In `[GameController]` the only thing the launcher
+  ever touches is the vibration field (chars 12–16) of `Mapping` — the
+  `rumble` option owns exactly those four characters; the pad GUID,
+  layout and the eleven button bindings are the player's, kept
+  character for character, with `Owned` release semantics. The save
+  files (`SEGA Rally.dat`, `SR_RANKTABLES.DAT`) are the game's: never
+  seeded, never deleted (only the empty seeds of earlier releases are
+  removed, see the owner decision).
 - Keep options specific to Sega Rally Revo and verified in the game.
   Anti-aliasing and the 62.5 fps Championship cap are deliberately absent;
   unverified values are listed in `docs/RUNTIME_NOTES.md`.

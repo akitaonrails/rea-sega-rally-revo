@@ -53,6 +53,7 @@ pub struct Form {
     pub look: Look,
     pub frame_limit: FrameLimit,
     pub stutter_fix: bool,
+    pub rumble: bool,
     pub language: String,
 }
 
@@ -73,6 +74,7 @@ impl Form {
             picture,
             frame_limit: settings.effective_frame_limit(),
             stutter_fix: settings.effective_stutter_fix(),
+            rumble: settings.effective_rumble(),
             language: settings.effective_language().to_string(),
         }
     }
@@ -152,6 +154,7 @@ impl Form {
             ("vsync", cfg::on_off(picture.vsync).to_string()),
             ("frame_limit", self.frame_limit.key().to_string()),
             ("stutter_fix", cfg::on_off(self.stutter_fix).to_string()),
+            ("rumble", cfg::on_off(self.rumble).to_string()),
             ("language", self.language.clone()),
         ];
         let text = spec::retire_removed(text, config::OPTIONS);

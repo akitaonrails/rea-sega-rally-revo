@@ -10,6 +10,7 @@ SRRLauncher [options]
   --vsync on|off                                           Vsync
   --frame-limit 60|120|off                                 Frame limit
   --stutter-fix on|off                                     Stutter fix
+  --rumble on|off                                          Pad rumble
   --language English|French|German|Spanish|Italian|Polish  Language
   --check                                                  check the game folder and exit (exit code 1 if it cannot play)
   --setup                                                  prepare the private copy and the game's settings, without playing

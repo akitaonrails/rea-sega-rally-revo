@@ -524,15 +524,29 @@ mod app {
         let owned_path = runtime_dir.join(runtime::CONFIG_OWNED);
         let mut owned = Owned::load(&owned_path).unwrap_or_default();
         let seeded = config_read.is_err();
-        match gamecfg::next_config(config_read, plan.seed, &plan.graphics, &mut owned) {
-            Ok(bytes) => {
+        match gamecfg::next_config(
+            config_read,
+            plan.seed,
+            &plan.graphics,
+            plan.rumble,
+            &mut owned,
+        ) {
+            Ok((bytes, rumble)) => {
                 fsx::write_atomic(&config_path, bytes)
                     .map_err(|error| format!("cannot write {}: {error}", config_path.display()))?;
                 owned
                     .save(&owned_path)
                     .map_err(|error| format!("cannot save {}: {error}", owned_path.display()))?;
+                let rumble = match rumble {
+                    Some(gamecfg::RumbleEdit::Written) => "; rumble written",
+                    Some(gamecfg::RumbleEdit::Seeded) => "; rumble seeded",
+                    Some(gamecfg::RumbleEdit::Foreign) => {
+                        "; rumble: unknown mapping format, left as it is"
+                    }
+                    None => "",
+                };
                 log_line(&format!(
-                    "config.ini: {} ({}x{}; set in launcher.cfg: {:?})",
+                    "config.ini: {} ({}x{}; set in launcher.cfg: {:?}{rumble})",
                     if seeded { "seeded" } else { "updated" },
                     plan.resolution.0,
                     plan.resolution.1,

@@ -10,6 +10,7 @@ Settings {
     vsync: None,
     frame_limit: None,
     stutter_fix: None,
+    rumble: None,
     language: None,
 }
 

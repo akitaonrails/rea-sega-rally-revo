@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added: `rumble` (`--rumble on|off`, Controls: Pad rumble) — turn the
+  game's pad vibration off (or back on). Writes the vibration field of the
+  game's own controller string; the pad, its GUID and bindings are kept
+  (issue #2). The Controls tab's old blanket "keep force feedback off"
+  warning is replaced by the switch.
+
 ## v0.3.3 - 2026-11-05
 
 - Updated rea-launcher-sdk to v0.4.3.

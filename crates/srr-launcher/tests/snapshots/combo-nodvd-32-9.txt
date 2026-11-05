@@ -25,6 +25,7 @@ Settings {
     stutter_fix: Some(
         true,
     ),
+    rumble: None,
     language: None,
 }
 
