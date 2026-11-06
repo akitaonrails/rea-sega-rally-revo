@@ -46,6 +46,8 @@ pub struct Host {
     pub buttons: Box<dyn Fn() -> u16>,
     /// Where the DirectX 9 files are kept.
     pub directx_root: PathBuf,
+    /// System folders checked for `d3dx9_35.dll` and `xinput1_3.dll` on Windows.
+    pub system_dirs: Vec<PathBuf>,
     /// Starts the DirectX download on a worker thread.
     pub start_download: Box<dyn Fn(Arc<Job>)>,
 }
@@ -176,6 +178,20 @@ impl Window {
         self.download
             .as_ref()
             .is_some_and(|job| job.phase().running())
+    }
+
+    /// On native Windows (`!self.host.dxvk`), returns which required DirectX 9
+    /// DLLs (`d3dx9_35.dll`, `xinput1_3.dll`) are missing from the downloaded
+    /// DirectX folder, the chosen game folder, and Windows (`SysWOW64`/`System32`).
+    fn missing_directx(&self) -> Vec<&'static str> {
+        if self.host.dxvk {
+            return Vec::new();
+        }
+        let pin = directx::pin();
+        let dx_dir = download::installed(&pin, &self.host.directx_root);
+        let game = self.form.game.trim();
+        let game_dir = (!game.is_empty()).then(|| Path::new(game));
+        directx::missing_required_dlls(dx_dir.as_deref(), game_dir, &self.host.system_dirs)
     }
 
     /// The window was asked to close; true to let it. During a download the
@@ -334,11 +350,19 @@ impl Window {
     }
 
     fn status(&self, ui: &mut egui::Ui) {
+        let missing_dx = self.missing_directx();
         let (text, color) = match (&self.error, &self.check) {
             (Some(error), _) => (error.clone(), ERROR),
             (None, Check::Found { .. }) if self.downloading() => {
                 (Self::PLAY_WAITS.to_string(), MUTED)
             }
+            (None, Check::Found { .. }) if !missing_dx.is_empty() => (
+                format!(
+                    "Missing DirectX 9 files ({}). Click Download below before playing.",
+                    missing_dx.join(", ")
+                ),
+                ORANGE,
+            ),
             (None, Check::Found { .. }) => ("Ready. Press Play or Enter.".to_string(), MUTED),
             (None, _) => (
                 "First, show the launcher where the game is.".to_string(),
@@ -467,10 +491,20 @@ impl Window {
         widgets::heading(ui, directx::LABEL);
         widgets::note(
             ui,
-            "Windows 10 and 11 lack the DirectX 9 files the game was built with. One download \
-             from Microsoft (100 MB) puts them in the private copy. Under Linux the game \
-             usually runs without them.",
+            "Windows 10 and 11 lack the DirectX 9 files the game was built with (d3dx9_35.dll \
+             and xinput1_3.dll). One download from Microsoft (100 MB) puts them in the private \
+             copy. Under Linux the game usually runs without them.",
         );
+        let missing = self.missing_directx();
+        if !missing.is_empty() && !self.downloading() {
+            widgets::error_note(
+                ui,
+                &format!(
+                    "Missing on this PC: {}. Click Download to install them into the private copy.",
+                    missing.join(", ")
+                ),
+            );
+        }
         let pin = directx::pin();
         let root = self.host.directx_root.clone();
         let installed = download::installed(&pin, &root).is_some();
@@ -693,6 +727,7 @@ mod native {
             test_rumble: Box::new(|| xinput::test_rumble(60, Duration::from_millis(500))),
             buttons: Box::new(xinput::buttons),
             directx_root: directx_root.to_path_buf(),
+            system_dirs: directx::windows_system_dirs(),
             start_download: {
                 let root = directx_root.to_path_buf();
                 Box::new(move |job| {

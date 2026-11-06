@@ -1,10 +1,12 @@
 //! Microsoft's DirectX 9 extension libraries (`d3dx9_24.dll` …
-//! `d3dx9_43.dll`, `D3DCompiler_*.dll`), fetched on the player's request.
+//! `d3dx9_43.dll`, `D3DCompiler_*.dll`, `xinput1_1.dll` … `xinput1_3.dll`),
+//! fetched on the player's request.
 //!
-//! The game links one of these; Windows 10/11 do not ship them, and the
-//! game's own installer put them in with Microsoft's DirectX runtime. The
-//! community Linux setup installed them with `winetricks d3dx9` to stop a
-//! main-menu crash (Wine's built-in copies are what runs otherwise).
+//! `SEGA Rally.exe` statically links `d3dx9_35.dll` and `XINPUT1_3.dll`;
+//! Windows 10/11 do not ship them, and the game's own installer put them in
+//! with Microsoft's DirectX runtime. The community Linux setup installed
+//! them with `winetricks d3dx9` to stop a main-menu crash (Wine's built-in
+//! copies are what runs otherwise).
 //!
 //! They cannot be bundled: the only package holding them, Microsoft's
 //! *DirectX End-User Runtime* (June 2010), is licensed to the person who
@@ -65,19 +67,68 @@ pub fn done_note(count: usize, dir: &Path) -> String {
 /// What the window shows for the row.
 pub const LABEL: &str = "Microsoft DirectX 9 files";
 
-/// The 32-bit cabinets wanted from the package: every D3DX9 and
-/// D3DCompiler version (the game names one of them; which one is not
-/// worth guessing, they are small).
+/// The 32-bit DirectX 9 DLLs `SEGA Rally.exe` and `SEGA Rally_SSE1.exe`
+/// statically import. Clean Windows 10 and 11 installs ship neither of them.
+pub const REQUIRED_DLLS: [&str; 2] = ["d3dx9_35.dll", "xinput1_3.dll"];
+
+/// Returns which of [`REQUIRED_DLLS`] are missing from the downloaded
+/// DirectX folder (`directx_dir`), the game folder (`game_dir`), and the
+/// 32-bit Windows system folders (`system_dirs`).
+pub fn missing_required_dlls(
+    directx_dir: Option<&Path>,
+    game_dir: Option<&Path>,
+    system_dirs: &[PathBuf],
+) -> Vec<&'static str> {
+    let has_dll = |dir: &Path, target: &str| {
+        if dir.join(target).is_file() {
+            return true;
+        }
+        fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .any(|name| name.eq_ignore_ascii_case(target))
+    };
+    REQUIRED_DLLS
+        .into_iter()
+        .filter(|&dll| {
+            let in_dx = directx_dir.is_some_and(|d| has_dll(d, dll));
+            let in_game = game_dir.is_some_and(|d| has_dll(d, dll));
+            let in_sys = system_dirs.iter().any(|d| has_dll(d, dll));
+            !in_dx && !in_game && !in_sys
+        })
+        .collect()
+}
+
+/// The 32-bit Windows system directories (`%SystemRoot%\SysWOW64` and
+/// `%SystemRoot%\System32`).
+pub fn windows_system_dirs() -> Vec<PathBuf> {
+    let root = std::env::var_os("SystemRoot")
+        .or_else(|| std::env::var_os("WINDIR"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    vec![root.join("SysWOW64"), root.join("System32")]
+}
+
+/// The 32-bit cabinets wanted from the package: every D3DX9, D3DCompiler
+/// and XInput 1.x version (`SEGA Rally.exe` imports `d3dx9_35.dll` and
+/// `xinput1_3.dll`).
 pub fn wanted_cab(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    lower.ends_with("_x86.cab") && (lower.contains("_d3dx9_") || lower.contains("_d3dcompiler_"))
+    lower.ends_with("_x86.cab")
+        && (lower.contains("_d3dx9_")
+            || lower.contains("_d3dcompiler_")
+            || lower.contains("_xinput_"))
 }
 
 /// The DLLs wanted from an inner cabinet.
 fn wanted_dll(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.ends_with(".dll")
-        && (lower.starts_with("d3dx9_") || lower.starts_with("d3dcompiler_"))
+        && (lower.starts_with("d3dx9_")
+            || lower.starts_with("d3dcompiler_")
+            || lower.starts_with("xinput1_"))
         && !lower.contains(['/', '\\'])
 }
 
@@ -189,13 +240,14 @@ pub fn override_names(dlls: &[String]) -> Vec<String> {
 }
 
 /// Every DLL name (lower case, no `.dll`) the DirectX download can put
-/// into the private copy: `d3dx9_24` … `d3dx9_43` and `d3dcompiler_33` …
-/// `d3dcompiler_43`. Used to take back registry overrides of files that
-/// are gone.
+/// into the private copy: `d3dx9_24` … `d3dx9_43`, `d3dcompiler_33` …
+/// `d3dcompiler_43`, and `xinput1_1` … `xinput1_3`. Used to take back
+/// registry overrides of files that are gone.
 pub fn all_override_names() -> Vec<String> {
     (24..=43)
         .map(|n| format!("d3dx9_{n}"))
         .chain((33..=43).map(|n| format!("d3dcompiler_{n}")))
+        .chain((1..=3).map(|n| format!("xinput1_{n}")))
         .collect()
 }
 
@@ -330,12 +382,14 @@ mod tests {
     fn package() -> Vec<u8> {
         let d3dx35 = cabinet(&[("d3dx9_35.dll", b"d3dx 35"), ("d3dx9_35_x86.inf", b"inf")]);
         let compiler = cabinet(&[("D3DCompiler_43.dll", b"compiler 43")]);
+        let xinput = cabinet(&[("xinput1_3.dll", b"xinput 1.3"), ("xinput1_3.inf", b"inf")]);
         let x64 = cabinet(&[("d3dx9_35.dll", b"64-bit")]);
         let xact = cabinet(&[("xactengine2_9.dll", b"xact")]);
         let outer = cabinet(&[
             ("AUG2007_d3dx9_35_x86.cab", &d3dx35),
             ("AUG2007_d3dx9_35_x64.cab", &x64),
             ("Jun2010_D3DCompiler_43_x86.cab", &compiler),
+            ("APR2007_xinput_x86.cab", &xinput),
             ("Jun2010_XACT_x86.cab", &xact),
             ("DXSETUP.exe", b"MZ setup"),
         ]);
@@ -353,13 +407,18 @@ mod tests {
     }
 
     #[test]
-    fn only_the_32_bit_d3dx9_and_compiler_files_come_out() {
+    fn only_the_32_bit_d3dx9_compiler_and_xinput_files_come_out() {
         let dlls = extract(&package()).unwrap();
         let names: Vec<&str> = dlls.iter().map(|(n, _)| n.as_str()).collect();
-        assert_eq!(names, ["D3DCompiler_43.dll", "d3dx9_35.dll"]);
+        assert_eq!(
+            names,
+            ["D3DCompiler_43.dll", "d3dx9_35.dll", "xinput1_3.dll"]
+        );
         assert_eq!(dlls[1].1, b"d3dx 35");
+        assert_eq!(dlls[2].1, b"xinput 1.3");
         assert!(extract(b"no cabinet here").is_err());
         assert!(wanted_cab("Apr2005_d3dx9_25_x86.cab"));
+        assert!(wanted_cab("APR2007_xinput_x86.cab"));
         assert!(!wanted_cab("Apr2005_d3dx9_25_x64.cab"));
         assert!(!wanted_cab("APR2007_d3dx10_33_x86.cab"));
     }
@@ -409,9 +468,16 @@ mod tests {
         let dir = install(&pin, &root, &|_| None, &Serve(body), &job).unwrap();
         assert_eq!(job.phase(), Phase::Done(dir.clone()));
         assert_eq!(download::installed(&pin, &root), Some(dir.clone()));
-        assert_eq!(dlls(&dir), ["D3DCompiler_43.dll", "d3dx9_35.dll"]);
+        assert_eq!(
+            dlls(&dir),
+            ["D3DCompiler_43.dll", "d3dx9_35.dll", "xinput1_3.dll"]
+        );
         assert_eq!(fs::read(dir.join("d3dx9_35.dll")).unwrap(), b"d3dx 35");
-        assert_eq!(override_names(&dlls(&dir)), ["d3dcompiler_43", "d3dx9_35"]);
+        assert_eq!(fs::read(dir.join("xinput1_3.dll")).unwrap(), b"xinput 1.3");
+        assert_eq!(
+            override_names(&dlls(&dir)),
+            ["d3dcompiler_43", "d3dx9_35", "xinput1_3"]
+        );
         assert!(!root.join(pin.file_name()).exists(), "package deleted");
         // Remove takes the folder and any leftovers.
         download::remove(&pin, &root).unwrap();

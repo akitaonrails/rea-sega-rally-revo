@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.1 - 2026-11-06
+
+- **DirectX 9 download now includes `xinput1_3.dll` (`APR2007_xinput_x86.cab`)
+  and highlights missing DLLs on Windows.** `SEGA Rally.exe` and
+  `SEGA Rally_SSE1.exe` statically link both `d3dx9_35.dll` and
+  `XINPUT1_3.dll`, neither of which ships on a clean Windows 10 or 11
+  installation. The DirectX 9 downloader now unpacks `xinput1_3.dll`
+  alongside `d3dx9_*.dll` and `D3DCompiler_*.dll`, and on Windows the
+  settings window shows a clear warning when either DLL is missing from the
+  system and the launcher's DirectX folder.
+- **Fatal Windows startup exit codes (`0xC0000135` `STATUS_DLL_NOT_FOUND`
+  and crashes) are now reported** instead of exiting silently.
+
 ## v0.4.0 - 2026-11-05
 
 - Added: `rumble` (`--rumble on|off`, Controls: Pad rumble) — turn the

@@ -645,7 +645,22 @@ mod app {
             .map_err(|error| format!("cannot start {}: {error}", plan.command.join(" ")))?;
         xinput::stop_rumble();
         let code = status.code().unwrap_or(1) as u32;
-        log_line(&format!("game exited with {code}"));
+        log_line(&format!("game exited with {code} (0x{code:08X})"));
+        if code >= 0xC000_0000 {
+            let detail = if code == 0xC000_0135 {
+                "a required DLL (such as d3dx9_35.dll or xinput1_3.dll) was not found. \
+                 Open the launcher and click Download under Microsoft DirectX 9 files, \
+                 or run: SRRLauncher --download-directx"
+            } else {
+                "a Windows startup error or crash occurred"
+            };
+            let msg = format!(
+                "{} exited with error 0x{code:08X} ({detail}).\n\nSee {} for details.",
+                plan.launch,
+                home().join("launcher.log").display()
+            );
+            fatal(&msg);
+        }
         Ok(code)
     }
 }

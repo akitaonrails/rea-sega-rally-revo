@@ -45,6 +45,7 @@ fn host(dxvk: bool, fake: &Fake, root: PathBuf) -> Host {
         }),
         buttons: Box::new(|| 0),
         directx_root: root,
+        system_dirs: Vec::new(),
         start_download: Box::new(move |_| downloads.set(downloads.get() + 1)),
     }
 }
@@ -394,4 +395,29 @@ fn closing_during_a_download_warns_then_cancels() {
     ui.run();
     assert!(ui.query_by_label(Window::CLOSE_HELD).is_none());
     assert!(ui.state_mut().close_requested());
+}
+
+#[test]
+fn missing_directx_on_windows_shows_warning_until_present() {
+    let (mut ui, _, dir) = open(None, false, "missing-dx");
+    ready(&mut ui);
+    assert!(
+        ui.query_by_label_contains("Missing DirectX 9 files (d3dx9_35.dll, xinput1_3.dll)")
+            .is_some()
+    );
+    assert!(
+        ui.query_by_label_contains("Missing on this PC: d3dx9_35.dll, xinput1_3.dll")
+            .is_some()
+    );
+    let sys = dir.join("syswow64");
+    std::fs::create_dir_all(&sys).unwrap();
+    std::fs::write(sys.join("d3dx9_35.dll"), b"dx").unwrap();
+    std::fs::write(sys.join("xinput1_3.dll"), b"xi").unwrap();
+    ui.state_mut().host.system_dirs = vec![sys];
+    ui.run();
+    assert!(
+        ui.query_by_label_contains("Ready. Press Play or Enter.")
+            .is_some()
+    );
+    assert!(ui.query_by_label_contains("Missing on this PC:").is_none());
 }
