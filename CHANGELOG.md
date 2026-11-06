@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.0 - 2026-11-05
 
 - Added: `rumble` (`--rumble on|off`, Controls: Pad rumble) — turn the
   game's pad vibration off (or back on). Writes the vibration field of the
