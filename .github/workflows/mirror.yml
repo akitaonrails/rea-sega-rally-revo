@@ -13,6 +13,6 @@ jobs:
   mirror:
     permissions:
       contents: write
-    uses: akitaonrails/rea-launcher-sdk/.github/workflows/mirror.yml@v0.4.3
+    uses: akitaonrails/rea-launcher-sdk/.github/workflows/mirror.yml@v0.4.4
     with:
       pins: packaging/third-party.txt

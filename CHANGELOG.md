@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **The AppImage's bundled Wine is 11.21, which fixes the startup crash on
+  machines that cannot reserve ~64 GiB of address space** (16 GB handhelds
+  such as the Legion Go S, and anything with a tighter commit limit):
+  Wine 11.20 sized its page-protection table from an unhonoured
+  `MAP_FIXED_NOREPLACE` probe, reserved ~64 GiB per process, and
+  dereferenced the resulting NULL table — SIGSEGV in `ntdll.so+0x787c9`
+  before the launcher ran (issue #3). 11.21 reserves ~8 GiB.
+- Packaging now fails when the bundled Wine dies at startup or reserves
+  more than 32 GiB (`packaging/tests/wine-startup.sh`, run by CI on the
+  built AppImage): this class of bug cannot ship unnoticed again.
+
 ## v0.4.1 - 2026-11-06
 
 - **DirectX 9 download now includes `xinput1_3.dll` (`APR2007_xinput_x86.cab`)

@@ -615,3 +615,31 @@ flip has not been *felt* in a race. First run with a pad: confirm the
 pad is silent with `rumble = off` and rumbles with `on`, and note it
 here.
 
+## 2026-11-07 — Wine 11.21: the handheld startup crash (issue #3)
+
+Two players on SteamOS-class handhelds crashed at
+`ntdll.so+0x787c9` before any launcher code ran. Reproduced exactly on this
+machine: Wine 11.20's host-address-space probe calls `mmap(..., 0x22,
+...)` without `MAP_FIXED_NOREPLACE`, so the hint is ignored, the probe
+breaks at `1 << 63`, and `pages_vprot` is sized to 32 GiB (plus a 32 GiB
+reservation): **65 557 MiB** of VmPeak per Wine process, measured with
+`wineboot --init`. Where that cannot be reserved (16 GB handheld), the
+`calloc` returns NULL, 11.20's assert compares against `MAP_FAILED` and
+passes for NULL, and the first `create_view()` dereferences it. Capping
+the 11.20 process at 8 GiB reproduced the reporters' exact offset in
+`coredumpctl`.
+
+Wine 11.21 (upstream fix: `3c49b97b`, Wine-Bug 60528) measures **8 215
+MiB**. The AppImage pin moves to 11.21 (Kron4ek amd64-wow64,
+sha256 `33f3c5b5…fb9dc83`) through the SDK; `packaging/tests/wine-startup.sh`
+now fails a build whose bundled Wine dies at startup or reserves more than
+32 GiB (red on 11.20 at 64 GiB, green on 11.21).
+
+Verified with the launcher: the 11.21 AppImage ran
+`SRRLauncher.exe --setup --linux` end to end (prefix, config.ini,
+registry, DXVK install, `setup complete`, exit 0).
+
+Not yet verified: a driven race under 11.21 + DXVK. The fleet has been
+sensitive to Wine version changes (an 11.13 upgrade black-screened the
+game in the distrobox-gaming setup), so drive one race before tagging the
+release.
