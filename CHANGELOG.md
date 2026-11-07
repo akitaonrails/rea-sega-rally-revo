@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.4.2 - 2026-11-07
+
 - **The AppImage's bundled Wine is 11.21, which fixes the startup crash on
   machines that cannot reserve ~64 GiB of address space** (16 GB handhelds
   such as the Legion Go S, and anything with a tighter commit limit):
