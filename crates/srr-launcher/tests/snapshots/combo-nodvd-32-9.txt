@@ -26,6 +26,8 @@ Settings {
         true,
     ),
     rumble: None,
+    display_mode: None,
+    keys: None,
     language: None,
 }
 

@@ -142,11 +142,11 @@ the button.
 
 **Play** has the game folder, the looks, the stutter fix, the frame limit,
 the menu language and the DirectX 9 download. **Picture** has the
-resolution (with the size and aspect the game will run at), the quality
-and vsync; changing any of them turns the look into **Custom**.
-**Controls** shows the connected Xbox-style pads, the pad-rumble switch
-and a **Test rumble** button, which only checks that the pad accepts
-rumble.
+resolution (with the size and aspect the game will run at), the quality,
+vsync and the display mode; changing the first three turns the look into
+**Custom**. **Controls** shows the connected Xbox-style pads, the
+pad-rumble switch, a **Test rumble** button, which only checks that the
+pad accepts rumble, and your keyboard keys.
 
 | Look | Resolution | Quality | Vsync | When to pick it |
 | --- | --- | --- | --- | --- |
@@ -192,10 +192,36 @@ manual:
 | Tab | Show or hide driver names |
 | O / P | Time Trial: class up / class down |
 
-The game has no menu to change these keys. The settings tool that came
-with the game can't change them either: it only sets up DirectInput pads
-and wheels. Changing keys is tracked in
-[issue #1](https://github.com/akitaonrails/rea-sega-rally-revo/issues/1).
+The game has no menu to change these keys, and the settings tool that
+came with the game only sets up DirectInput pads and wheels. The launcher
+can change them: on the Controls tab, **Keyboard keys** takes
+`action=key` pairs separated by commas, for example
+
+```
+keys = accelerate=up, brake=down, steer_left=left, steer_right=right
+```
+
+Actions: `accelerate`, `brake`, `steer_left`, `steer_right`,
+`handbrake`, `shift_up`, `shift_down`, `camera`, `driver_names`,
+`class_up`, `class_down`. Keys are named by where they sit on a US
+keyboard (the game reads key positions, not letters): `a`–`z`, `0`–`9`,
+`up`, `down`, `left`, `right`, `space`, `tab`, `backspace`,
+`left_shift`, `right_shift`, `left_ctrl`, `right_ctrl`, `left_alt`,
+`right_alt`, `comma`, `period`, `slash`, `semicolon`, `apostrophe`,
+`grave`, `minus`, `equals`, `left_bracket`, `right_bracket`,
+`backslash`, `insert`, `delete`, `home`, `end`, `page_up`, `page_down`,
+`numpad_0`–`numpad_9`, `numpad_plus`, `numpad_minus`,
+`numpad_multiply`, `numpad_divide`, `numpad_period`, `numpad_enter`.
+Escape, Enter and the F keys stay with the game's menus. An action you
+don't name keeps its key from the table above; two actions can't share a
+key. The window shows the keys you will get as you type.
+
+This patches the launcher's private copy of the game (your game folder
+stays untouched): the game asks "is A down?" and gets the answer for the
+key you chose. Keys you didn't move work as before, so the menus are
+unchanged. It works with the clean `SEGA Rally_SSE1.exe` and the
+full rip's `SEGA Rally.exe`; a copy already patched with the community
+stutter fix runs with the manual's keys.
 
 ## Options
 
@@ -215,6 +241,8 @@ commented `launcher.cfg` listing every option.
 | `language` / `--language` | Play: Language | `English`, `French`, `German`, `Spanish`, `Italian`, `Polish` | the game's (English when it has none) | The language of the game's menus. |
 | `resolution` / `--resolution` | Picture: Resolution | `auto` or `WIDTHxHEIGHT` | the game's (your screen on a first run) | The game's screen size; `auto` uses your screen. Ultra-wide sizes (21:9 such as 3440×1440, 32:9 such as 5120×1440) get the aspect fix so the picture isn't stretched. |
 | `quality` / `--quality` | Picture: Quality | `normal`, `high`, `ultra` | the game's (High on a first run) | The game's detail preset: Normal is the 2007 look, High sharper shadows and track detail, Ultra every slider at maximum. |
+| `display_mode` / `--display-mode` | Picture: Display mode | `fullscreen`, `borderless` | fullscreen | Fullscreen is the game's own: it switches the screen to the resolution. Borderless puts the game in a window without borders that covers the whole screen: no display-mode switch, quick Alt+Tab, and a smaller resolution is scaled up to the screen. Under Linux the game's Wine desktop then covers the screen too. Patches the private copy (the clean `SEGA Rally_SSE1.exe` or the full rip's `SEGA Rally.exe`). |
+| `keys` / `--keys` | Controls: Keyboard keys | `action=key` pairs, e.g. `accelerate=up, brake=down` | the manual's keys | Your own keyboard keys: see [Keyboard](#keyboard). |
 | `vsync` / `--vsync` | Picture: Vsync | `on`, `off` | the game's (on on a first run) | Waits for the screen's refresh: no tearing. Off can tear on screens above 60 Hz. |
 
 An unset option keeps the game's own value: once the game has its
@@ -255,8 +283,9 @@ list, and shows no message box when you started it from a terminal); with
 is still running from the launcher's copy), or `--check`, `--setup` or
 `--download-directx` found the settings window open.
 
-The game always runs fullscreen. Under Wine that fullscreen is its own
-Wine desktop, a window of the chosen size on your desktop.
+The game runs fullscreen, or borderless with `display_mode = borderless`.
+Under Wine it runs in its own Wine desktop: a window of the chosen size on
+your desktop, or one covering the screen in borderless mode.
 
 ## Where things live
 
@@ -318,8 +347,9 @@ Registry entries the launcher writes:
   the pace.
 - Not tested yet: native Windows 10/11 (including whether the game needs
   the DirectX 9 download), the Steam Deck in Game Mode, Steam's Proton
-  running `SRRLauncher.exe`, and the ultra-wide aspect fix on a real 21:9
-  or 32:9 screen. See [docs/RUNTIME_NOTES.md](docs/RUNTIME_NOTES.md).
+  running `SRRLauncher.exe`, the ultra-wide aspect fix on a real 21:9
+  or 32:9 screen, borderless mode on native Windows (tested under Wine
+  and DXVK), and changed keys with a pad connected at the same time. See [docs/RUNTIME_NOTES.md](docs/RUNTIME_NOTES.md).
 
 ## Uninstall
 

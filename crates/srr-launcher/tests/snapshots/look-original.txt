@@ -32,6 +32,10 @@ Settings {
     rumble: Some(
         true,
     ),
+    display_mode: Some(
+        Fullscreen,
+    ),
+    keys: None,
     language: Some(
         "English",
     ),

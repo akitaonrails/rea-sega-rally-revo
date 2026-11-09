@@ -9,6 +9,9 @@
 //!   fullscreen directly.
 //! - On native Windows, fullscreen needs a real landscape mode; when there
 //!   is none the launcher can only warn.
+//! - Borderless (a patch, `patches::BORDERLESS_*`) needs no mode at all: a
+//!   screen-sized window; under plain Wine it still runs in the isolated
+//!   desktop, which then covers the screen.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Plan {
@@ -20,15 +23,26 @@ pub enum Plan {
     WarnPortrait,
     /// Native Windows without that display mode: expect a failed switch.
     WarnUnsupportedMode,
+    /// The borderless patch: a screen-sized window, no mode switch (native
+    /// Windows, or inside gamescope).
+    Borderless,
 }
 
-pub fn plan(wine: bool, gamescope: bool, portrait: bool, mode_supported: bool) -> Plan {
+pub fn plan(
+    wine: bool,
+    gamescope: bool,
+    portrait: bool,
+    mode_supported: bool,
+    borderless: bool,
+) -> Plan {
+    if wine && !gamescope {
+        return Plan::WineDesktop;
+    }
+    if borderless {
+        return Plan::Borderless;
+    }
     if wine {
-        return if gamescope {
-            Plan::Fullscreen
-        } else {
-            Plan::WineDesktop
-        };
+        return Plan::Fullscreen;
     }
     if portrait {
         Plan::WarnPortrait
@@ -45,16 +59,28 @@ mod tests {
 
     #[test]
     fn plain_wine_uses_the_isolated_desktop() {
-        assert_eq!(plan(true, false, false, true), Plan::WineDesktop);
+        assert_eq!(plan(true, false, false, true, false), Plan::WineDesktop);
         // a portrait host monitor does not matter inside the Wine desktop
-        assert_eq!(plan(true, false, true, false), Plan::WineDesktop);
-        assert_eq!(plan(true, true, false, true), Plan::Fullscreen);
+        assert_eq!(plan(true, false, true, false, false), Plan::WineDesktop);
+        assert_eq!(plan(true, true, false, true, false), Plan::Fullscreen);
+        // borderless keeps the isolated desktop under plain Wine
+        assert_eq!(plan(true, false, false, true, true), Plan::WineDesktop);
+        assert_eq!(plan(true, true, false, true, true), Plan::Borderless);
     }
 
     #[test]
     fn windows_needs_a_supported_landscape_mode() {
-        assert_eq!(plan(false, false, false, true), Plan::Fullscreen);
-        assert_eq!(plan(false, false, true, true), Plan::WarnPortrait);
-        assert_eq!(plan(false, false, false, false), Plan::WarnUnsupportedMode);
+        assert_eq!(plan(false, false, false, true, false), Plan::Fullscreen);
+        assert_eq!(plan(false, false, true, true, false), Plan::WarnPortrait);
+        assert_eq!(
+            plan(false, false, false, false, false),
+            Plan::WarnUnsupportedMode
+        );
+    }
+
+    #[test]
+    fn borderless_on_windows_needs_no_display_mode() {
+        assert_eq!(plan(false, false, true, false, true), Plan::Borderless);
+        assert_eq!(plan(false, false, false, true, true), Plan::Borderless);
     }
 }

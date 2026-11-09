@@ -478,7 +478,7 @@ mod app {
                 sse1_bytes.as_deref()
             }
             .ok_or("a game executable disappeared")?;
-            let patched = patches::apply(pristine, sets)
+            let patched = patches::apply(pristine, sets, plan.key_table.as_ref())
                 .map_err(|error| format!("{name}: {} refused: {error}", patches::names(sets)))?;
             let target = runtime_dir.join(name);
             if fs::read(&target).ok().as_deref() != Some(&patched[..]) {
@@ -495,7 +495,13 @@ mod app {
         match plan.display {
             srr_launcher::display::Plan::Fullscreen => {}
             srr_launcher::display::Plan::WineDesktop => log_line(&format!(
-                "display: an isolated Wine desktop at {}x{}",
+                "display: an isolated Wine desktop ({}), the game at {}x{}",
+                plan.command.get(1).map_or("", String::as_str),
+                plan.resolution.0,
+                plan.resolution.1
+            )),
+            srr_launcher::display::Plan::Borderless => log_line(&format!(
+                "display: borderless, the game at {}x{} scaled to the screen",
                 plan.resolution.0, plan.resolution.1
             )),
             srr_launcher::display::Plan::WarnPortrait => log_line(

@@ -7,7 +7,7 @@
 
 use rea_launcher::patch::PatchSet;
 
-use crate::config::{Aspect, Quality, Settings};
+use crate::config::{Aspect, DisplayMode, Quality, Settings};
 use crate::display;
 use crate::edition::{GameEditions, MAIN_EXE, SSE1_EXE};
 use crate::gamecfg::{self, Graphics, RegValue};
@@ -68,6 +68,8 @@ pub struct Plan {
     /// Under Wine, our earlier per-exe overrides to take back (components
     /// off or files gone; SDK `remove_app_dll_overrides`).
     pub app_dlls_off: Vec<String>,
+    /// The key table for the keys set (`None`: the manual's keys).
+    pub key_table: Option<[u8; 256]>,
     pub display: display::Plan,
     /// The program and its arguments.
     pub command: Vec<String>,
@@ -128,6 +130,9 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
         ));
     }
 
+    let borderless = settings.effective_display_mode() == DisplayMode::Borderless;
+    let keys = settings.effective_keys();
+    let key_table = (!keys.is_default()).then(|| keys.table());
     let mut patches = Vec::new();
     for (name, edition) in [(MAIN_EXE, main), (SSE1_EXE, sse1)] {
         let Some(edition) = edition else { continue };
@@ -138,7 +143,35 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
         if let Some(set) = patches::aspect_set(edition.sha256, aspect) {
             sets.push(set);
         }
+        let wanted = [
+            (
+                borderless,
+                patches::borderless_set(edition.sha256),
+                "borderless",
+            ),
+            (
+                key_table.is_some(),
+                patches::keys_set(edition.sha256),
+                "keys",
+            ),
+        ];
+        for (on, set, what) in wanted {
+            match (on, set) {
+                (true, Some(set)) => sets.push(set),
+                (true, None) if name == launch => notes.push(format!(
+                    "{what}: not available for this {name} (it needs the clean SEGA Rally_SSE1.exe \
+                     or the NoDVD SEGA Rally.exe); running without"
+                )),
+                _ => {}
+            }
+        }
         patches.push((name, sets));
+    }
+    if key_table.is_some() {
+        notes.push(format!(
+            "keys: {} (every other key as in the manual)",
+            keys.text()
+        ));
     }
 
     if let Some(on) = settings.rumble {
@@ -172,17 +205,31 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
     };
 
     let portrait = env.screen.is_some_and(|(width, height)| width < height);
+    let launch_borderless = borderless
+        && patches
+            .iter()
+            .any(|(name, sets)| *name == launch && sets.iter().any(|set| set.name == "borderless"));
     let display = display::plan(
         env.wine,
         env.gamescope,
         portrait,
         env.wine || env.mode_supported,
+        launch_borderless,
     );
+    // Borderless under plain Wine: the isolated desktop covers the screen
+    // and the game's window covers the desktop, scaling its resolution.
+    let desktop = if launch_borderless {
+        env.screen
+            .and_then(crate::config::landscape)
+            .unwrap_or(resolution)
+    } else {
+        resolution
+    };
     let exe = format!("{}\\{launch}", env.runtime.trim_end_matches('\\'));
     let command = match display {
         display::Plan::WineDesktop => vec![
             "explorer".to_string(),
-            format!("/desktop=SegaRally,{}x{}", resolution.0, resolution.1),
+            format!("/desktop=SegaRally,{}x{}", desktop.0, desktop.1),
             exe,
         ],
         _ => vec![exe],
@@ -201,6 +248,7 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
         dll_overrides,
         app_dlls,
         app_dlls_off,
+        key_table,
         display,
         command,
         gpu_preference: !env.wine,
@@ -500,6 +548,27 @@ mod tests {
                 p.rumble == Some(false)
                     && p.notes.iter().any(|note| note.starts_with("rumble: off"))
             }),
+            ("display_mode", &["--display-mode", "borderless"], |p, _| {
+                let sse1 = p
+                    .patches
+                    .iter()
+                    .find(|(name, _)| *name == SSE1_EXE)
+                    .unwrap();
+                sse1.1.iter().any(|set| set.name == "borderless")
+                    && p.command[1] == "/desktop=SegaRally,3840x2160"
+            }),
+            ("keys", &["--keys", "accelerate=up"], |p, _| {
+                let sse1 = p
+                    .patches
+                    .iter()
+                    .find(|(name, _)| *name == SSE1_EXE)
+                    .unwrap();
+                sse1.1.iter().any(|set| set.name == "keys")
+                    && p.key_table.is_some_and(|table| table[0x1E] == 0xC8)
+                    && p.notes.iter().any(|note| {
+                        note == "keys: accelerate=up (every other key as in the manual)"
+                    })
+            }),
             ("language", &["--language", "german"], |p, _| {
                 p.registry
                     .iter()
@@ -524,5 +593,66 @@ mod tests {
                 "{key} holds by default"
             );
         }
+    }
+    #[test]
+    fn borderless_scales_the_game_to_the_screen() {
+        let settings = file("display_mode = borderless\nresolution = 1280x720\n");
+        // Plain Wine: the isolated desktop covers the screen, the game keeps
+        // its resolution (scaled up by its window).
+        let plan = plan(&settings, &RIP, &linux());
+        assert_eq!(plan.command[1], "/desktop=SegaRally,3840x2160");
+        assert_eq!(plan.resolution, (1280, 720));
+        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "borderless"]);
+        // Native Windows: no mode needed, so no warning about one.
+        let mut env = windows();
+        env.mode_supported = false;
+        let plan = super::plan(&settings, &RIP, &env);
+        assert_eq!(plan.display, display::Plan::Borderless);
+        // gamescope: the game's window inside it.
+        let mut env = linux();
+        env.gamescope = true;
+        assert_eq!(
+            super::plan(&settings, &RIP, &env).display,
+            display::Plan::Borderless
+        );
+        // Fullscreen (the default) keeps the desktop at the game's size.
+        let plan = super::plan(&file("resolution = 1280x720\n"), &RIP, &linux());
+        assert_eq!(plan.command[1], "/desktop=SegaRally,1280x720");
+        assert_eq!(sets(&plan, SSE1_EXE), ["pacer"]);
+    }
+
+    #[test]
+    fn keys_patch_both_builds_and_only_when_moved() {
+        let plan = plan(&file("keys = brake=down\n"), &RIP, &linux());
+        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "keys"]);
+        assert_eq!(sets(&plan, MAIN_EXE), ["keys"]);
+        assert_eq!(plan.key_table.unwrap()[0x2C], 0xD0);
+        // The manual's keys said out loud: no patch.
+        let plan = super::plan(&file("keys = accelerate=a\n"), &RIP, &linux());
+        assert_eq!(plan.key_table, None);
+        assert_eq!(sets(&plan, MAIN_EXE), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn a_build_without_the_sets_runs_without_them() {
+        // The community-fixed SSE1 build: no borderless or keys set.
+        let editions = GameEditions {
+            main: None,
+            sse1: Some(Ok(&SSE1_PACER_BUILD)),
+        };
+        let settings = file("display_mode = borderless\nkeys = accelerate=up\n");
+        let plan = plan(&settings, &editions, &linux());
+        assert_eq!(sets(&plan, SSE1_EXE), Vec::<&str>::new());
+        assert_eq!(plan.display, display::Plan::WineDesktop);
+        assert!(
+            plan.notes
+                .iter()
+                .any(|n| n.starts_with("borderless: not available"))
+        );
+        assert!(
+            plan.notes
+                .iter()
+                .any(|n| n.starts_with("keys: not available"))
+        );
     }
 }

@@ -5,6 +5,7 @@ pub mod edition;
 pub mod form;
 pub mod gamecfg;
 pub mod instance;
+pub mod keys;
 pub mod pacer;
 pub mod patches;
 pub mod plan;

@@ -16,8 +16,8 @@
 //!
 //! `docs/RESEARCH.md` explains the sites; `describe()` prints them.
 
-use rea_launcher::identify::hex32;
-use rea_launcher::patch::{self, At, PatchError, PatchSet, PatchSite};
+use rea_launcher::identify::{self, hex32};
+use rea_launcher::patch::{self, At, PatchCave, PatchError, PatchSet, PatchSite};
 
 use crate::config::Aspect;
 
@@ -119,13 +119,298 @@ pub const ASPECT_32_MAIN: PatchSet = aspect_set!(
     RATIO_32_9
 );
 
+/// Where one build keeps what the borderless and keys sets touch (VAs;
+/// `.text` file offset = VA - 0x400000 in both builds). `docs/RESEARCH.md`
+/// ("Borderless", "Keyboard keys") has the evidence.
+struct Build {
+    /// `0x58E350`'s `mov ebx,1 / push 0x20 / mov [FULLSCREEN],ebx`: the
+    /// device setup forces the game's "fullscreen" global to 1 before
+    /// `Direct3DCreate9` (so `RunWindowed` does nothing).
+    fullscreen_site: u32,
+    fullscreen_global: u32,
+    /// `mov edx,[REFRESH]`: the configured refresh rate, copied to
+    /// `FullScreen_RefreshRateInHz` (must be 0 in a window).
+    refresh_site: u32,
+    refresh_global: u32,
+    /// The five `push 0` (style, X, Y, width, height) and `push eax`
+    /// (parent) before `CreateWindowExA("SegaClass")`, and where the push
+    /// of the window name follows.
+    window_site: u32,
+    window_resume: u32,
+    zero_reg_push: u8,
+    /// IAT slot of `GetSystemMetrics`.
+    get_system_metrics: u32,
+    /// Zero `.text` slack past the game's last code byte.
+    window_cave: u32,
+    /// The input object's four key accessors (vtable `+0x24/+0x28/+0x20/
+    /// +0x1C`): `movzx ecx, byte [esp+8]` loads the key code.
+    key_sites: [u32; 4],
+    key_cave: u32,
+}
+
+const SSE1: Build = Build {
+    fullscreen_site: 0x0058_E360,
+    fullscreen_global: 0x009E_0CBC,
+    refresh_site: 0x0058_E3C6,
+    refresh_global: 0x00A1_344C,
+    window_site: 0x0055_86B7,
+    window_resume: 0x0055_86BD,
+    zero_reg_push: 0x53, // push ebx
+    get_system_metrics: 0x0068_6298,
+    window_cave: 0x0068_5200, // after the pacer's cave (0x685030..0x68510F)
+    key_sites: [0x0057_8146, 0x0057_8178, 0x0057_81C3, 0x0057_8203],
+    key_cave: 0x0068_5300,
+};
+
+const MAIN: Build = Build {
+    fullscreen_site: 0x0058_BCB0,
+    fullscreen_global: 0x009C_DCBC,
+    refresh_site: 0x0058_BD16,
+    refresh_global: 0x00A0_044C,
+    window_site: 0x0055_6177,
+    window_resume: 0x0055_617D,
+    zero_reg_push: 0x57, // push edi
+    get_system_metrics: 0x0068_326C,
+    window_cave: 0x0068_2800,
+    key_sites: [0x0057_7086, 0x0057_70B8, 0x0057_7103, 0x0057_7143],
+    key_cave: 0x0068_2830,
+};
+
+const fn le(value: u32) -> [u8; 4] {
+    value.to_le_bytes()
+}
+
+/// `E8`/`E9` + rel32 from `from` to `to`.
+const fn branch(op: u8, from: u32, to: u32) -> [u8; 5] {
+    let rel = le(to.wrapping_sub(from.wrapping_add(5)));
+    [op, rel[0], rel[1], rel[2], rel[3]]
+}
+
+const fn fullscreen_original(b: &Build) -> [u8; 13] {
+    let g = le(b.fullscreen_global);
+    [
+        0xBB, 1, 0, 0, 0, 0x6A, 0x20, 0x89, 0x1D, g[0], g[1], g[2], g[3],
+    ]
+}
+
+/// `xor ebx,ebx / mov [FULLSCREEN],ebx / inc ebx / push 0x20 / nop nop`:
+/// the global is 0 (a window), EBX is 1 again for what follows.
+const fn fullscreen_patched(b: &Build) -> [u8; 13] {
+    let g = le(b.fullscreen_global);
+    [
+        0x31, 0xDB, 0x89, 0x1D, g[0], g[1], g[2], g[3], 0x43, 0x6A, 0x20, 0x90, 0x90,
+    ]
+}
+
+const fn refresh_original(b: &Build) -> [u8; 6] {
+    let g = le(b.refresh_global);
+    [0x8B, 0x15, g[0], g[1], g[2], g[3]]
+}
+
+/// `xor edx,edx`: refresh rate 0, as Direct3D requires for a window.
+const REFRESH_PATCHED: [u8; 6] = [0x31, 0xD2, 0x90, 0x90, 0x90, 0x90];
+
+const fn window_original(b: &Build) -> [u8; 6] {
+    let z = b.zero_reg_push;
+    [0x50, z, z, z, z, z]
+}
+
+const fn window_patched(b: &Build) -> [u8; 6] {
+    let j = branch(0xE9, b.window_site, b.window_cave);
+    [j[0], j[1], j[2], j[3], j[4], 0x90]
+}
+
+pub const WINDOW_CAVE_LEN: usize = 33;
+
+/// The window cave: the pushes `CreateWindowExA` gets instead of zeros:
+/// parent (EAX, as before), height and width of the screen
+/// (`GetSystemMetrics(SM_CYSCREEN/SM_CXSCREEN)`), X = Y = 0 and
+/// `WS_POPUP | WS_VISIBLE` (no border, no caption); then back.
+const fn window_cave(b: &Build) -> [u8; WINDOW_CAVE_LEN] {
+    let g = le(b.get_system_metrics);
+    let back = branch(0xE9, b.window_cave + 28, b.window_resume);
+    [
+        0x50, // push eax (parent)
+        0x6A, 0x01, 0xFF, 0x15, g[0], g[1], g[2], g[3], // GetSystemMetrics(SM_CYSCREEN)
+        0x50, // push eax (height)
+        0x6A, 0x00, 0xFF, 0x15, g[0], g[1], g[2], g[3], // GetSystemMetrics(SM_CXSCREEN)
+        0x50, // push eax (width)
+        0x6A, 0x00, 0x6A, 0x00, // Y, X
+        0x68, 0x00, 0x00, 0x00, 0x90, // WS_POPUP | WS_VISIBLE
+        back[0], back[1], back[2], back[3], back[4],
+    ]
+}
+
+/// `movzx ecx, byte [esp+8]`: the key code an accessor was asked about.
+const KEY_ORIGINAL: [u8; 5] = [0x0F, 0xB6, 0x4C, 0x24, 0x08];
+pub const KEY_CODE_LEN: usize = 16;
+/// Code then table: the table starts `KEY_CODE_LEN` bytes into the cave.
+pub const KEY_CAVE_LEN: usize = KEY_CODE_LEN + 256;
+
+/// `movzx ecx, byte [esp+0xC]` (the same argument under the return
+/// address) / `movzx ecx, byte [ecx+TABLE]` / `ret`, padded with int3,
+/// then the 256-byte table, identity here (the launcher writes the
+/// player's keys over it: [`apply`]).
+const fn key_cave(b: &Build) -> [u8; KEY_CAVE_LEN] {
+    let t = le(b.key_cave + KEY_CODE_LEN as u32);
+    let mut out = [0u8; KEY_CAVE_LEN];
+    let code = [
+        0x0F, 0xB6, 0x4C, 0x24, 0x0C, 0x0F, 0xB6, 0x89, t[0], t[1], t[2], t[3], 0xC3,
+    ];
+    let mut i = 0;
+    while i < KEY_CODE_LEN {
+        out[i] = if i < code.len() { code[i] } else { 0xCC };
+        i += 1;
+    }
+    while i < KEY_CAVE_LEN {
+        out[i] = (i - KEY_CODE_LEN) as u8;
+        i += 1;
+    }
+    out
+}
+
+const fn key_call(b: &Build, i: usize) -> [u8; 5] {
+    branch(0xE8, b.key_sites[i], b.key_cave)
+}
+
+const ZERO_WINDOW_CAVE: [u8; WINDOW_CAVE_LEN] = [0; WINDOW_CAVE_LEN];
+const ZERO_KEY_CAVE: [u8; KEY_CAVE_LEN] = [0; KEY_CAVE_LEN];
+
+macro_rules! borderless_set {
+    ($build:expr, $editions:expr) => {
+        PatchSet {
+            name: "borderless",
+            summary: "The game in a borderless window over the whole screen, no display-mode switch",
+            editions: $editions,
+            sites: &[
+                PatchSite {
+                    at: At::Va($build.fullscreen_site),
+                    original: &fullscreen_original(&$build),
+                    patched: &fullscreen_patched(&$build),
+                    note: "device setup: the fullscreen global becomes 0 (D3DPRESENT_PARAMETERS.Windowed = 1)",
+                },
+                PatchSite {
+                    at: At::Va($build.refresh_site),
+                    original: &refresh_original(&$build),
+                    patched: &REFRESH_PATCHED,
+                    note: "FullScreen_RefreshRateInHz = 0 (required in a window)",
+                },
+                PatchSite {
+                    at: At::Va($build.window_site),
+                    original: &window_original(&$build),
+                    patched: &window_patched(&$build),
+                    note: "CreateWindowExA(\"SegaClass\"): jump to the window cave for its size and style",
+                },
+                PatchSite {
+                    at: At::Va($build.window_cave),
+                    original: &ZERO_WINDOW_CAVE,
+                    patched: &window_cave(&$build),
+                    note: "window cave: screen-sized WS_POPUP|WS_VISIBLE window at 0,0",
+                },
+            ],
+            caves: &[PatchCave {
+                name: "window",
+                at: At::Va($build.window_cave),
+                len: WINDOW_CAVE_LEN,
+            }],
+            results: &[],
+        }
+    };
+}
+
+macro_rules! keys_set {
+    ($build:expr, $editions:expr) => {
+        PatchSet {
+            name: "keys",
+            summary: "The player's keyboard keys: the game's key accessors read through a table",
+            editions: $editions,
+            sites: &[
+                PatchSite {
+                    at: At::Va($build.key_sites[0]),
+                    original: &KEY_ORIGINAL,
+                    patched: &key_call(&$build, 0),
+                    note: "key accessor (last frame): call the key cave",
+                },
+                PatchSite {
+                    at: At::Va($build.key_sites[1]),
+                    original: &KEY_ORIGINAL,
+                    patched: &key_call(&$build, 1),
+                    note: "key accessor (down): call the key cave",
+                },
+                PatchSite {
+                    at: At::Va($build.key_sites[2]),
+                    original: &KEY_ORIGINAL,
+                    patched: &key_call(&$build, 2),
+                    note: "key accessor (just pressed): call the key cave",
+                },
+                PatchSite {
+                    at: At::Va($build.key_sites[3]),
+                    original: &KEY_ORIGINAL,
+                    patched: &key_call(&$build, 3),
+                    note: "key accessor (just released): call the key cave",
+                },
+                PatchSite {
+                    at: At::Va($build.key_cave),
+                    original: &ZERO_KEY_CAVE,
+                    patched: &key_cave(&$build),
+                    note: "key cave: ECX = table[key]; the 256-byte table follows the code",
+                },
+            ],
+            caves: &[PatchCave {
+                name: "keys",
+                at: At::Va($build.key_cave),
+                len: KEY_CAVE_LEN,
+            }],
+            results: &[],
+        }
+    };
+}
+
+/// Borderless and keys exist for the clean SSE1 build (with or without
+/// the stutter fix) and the NoDVD build. The community-fixed SSE1 build
+/// is not covered: its caves are unknown to us (never brought in).
+pub const BORDERLESS_SSE1: PatchSet = borderless_set!(SSE1, &[SSE1_CLEAN]);
+pub const BORDERLESS_MAIN: PatchSet = borderless_set!(MAIN, &[MAIN_NODVD]);
+pub const KEYS_SSE1: PatchSet = keys_set!(SSE1, &[SSE1_CLEAN]);
+pub const KEYS_MAIN: PatchSet = keys_set!(MAIN, &[MAIN_NODVD]);
+
+/// The addresses and the two sets of a build that has them.
+fn build_of(build: [u8; 32]) -> Option<(&'static Build, &'static PatchSet, &'static PatchSet)> {
+    if build == SSE1_CLEAN {
+        Some((&SSE1, &BORDERLESS_SSE1, &KEYS_SSE1))
+    } else if build == MAIN_NODVD {
+        Some((&MAIN, &BORDERLESS_MAIN, &KEYS_MAIN))
+    } else {
+        None
+    }
+}
+
+/// File offset of the key table in a build's executable.
+fn key_table_offset(build: [u8; 32]) -> Option<usize> {
+    build_of(build).map(|(b, _, _)| (b.key_cave - 0x0040_0000) as usize + KEY_CODE_LEN)
+}
+
+/// The borderless set for a build, `None` for a build without one.
+pub fn borderless_set(build: [u8; 32]) -> Option<&'static PatchSet> {
+    build_of(build).map(|(_, set, _)| set)
+}
+
+/// The keys set for a build, `None` for a build without one.
+pub fn keys_set(build: [u8; 32]) -> Option<&'static PatchSet> {
+    build_of(build).map(|(_, _, set)| set)
+}
+
 /// Every set, for docs and the real-game test.
-pub const ALL: [&PatchSet; 5] = [
+pub const ALL: [&PatchSet; 9] = [
     &PACER,
     &ASPECT_21_SSE1,
     &ASPECT_32_SSE1,
     &ASPECT_21_MAIN,
     &ASPECT_32_MAIN,
+    &BORDERLESS_SSE1,
+    &BORDERLESS_MAIN,
+    &KEYS_SSE1,
+    &KEYS_MAIN,
 ];
 
 /// The aspect set for a build and an aspect, `None` for native aspects or
@@ -156,8 +441,31 @@ pub fn names(sets: &[&PatchSet]) -> String {
 /// `sets` applied to a pristine executable from the game folder; the
 /// SDK refuses another build, a site with other bytes or a wrong result
 /// hash, and nothing is returned then.
-pub fn apply(pristine: &[u8], sets: &[&PatchSet]) -> Result<Vec<u8>, PatchError> {
-    patch::apply_sets(pristine, sets)
+///
+/// With a keys set among `sets`, `key_table` (see `keys::KeyMap::table`)
+/// replaces the set's identity table.
+pub fn apply(
+    pristine: &[u8],
+    sets: &[&PatchSet],
+    key_table: Option<&[u8; 256]>,
+) -> Result<Vec<u8>, PatchError> {
+    let mut out = patch::apply_sets(pristine, sets)?;
+    if let Some(table) = key_table
+        && sets.iter().any(|set| set.name == "keys")
+        && let Some(offset) = key_table_offset(identify::sha256(pristine))
+    {
+        let identity: [u8; 256] = std::array::from_fn(|k| k as u8);
+        patch::apply(
+            &mut out,
+            &[patch::Site {
+                name: "key table",
+                offset,
+                expected: &identity,
+                patched: table,
+            }],
+        )?;
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -198,7 +506,11 @@ mod tests {
     fn every_set_passes_the_golden_checks() {
         // The pacer has VA sites and its own golden tests on a synthetic
         // PE (tests/pacer_golden.rs).
-        for set in ALL.iter().filter(|set| set.name != "pacer") {
+        for set in ALL.iter().filter(|set| {
+            set.sites
+                .iter()
+                .all(|site| matches!(site.at, At::Offset(_)))
+        }) {
             testing::assert_golden(set, &synthetic(set));
         }
     }
@@ -208,11 +520,11 @@ mod tests {
         // A synthetic file is no known build: nothing is patched.
         // (The pacer's refusal of unknown builds: tests/pacer_golden.rs.)
         assert!(matches!(
-            apply(&synthetic(&ASPECT_21_SSE1), &[&ASPECT_21_SSE1]),
+            apply(&synthetic(&ASPECT_21_SSE1), &[&ASPECT_21_SSE1], None),
             Err(PatchError::UnknownEdition { .. })
         ));
         assert!(matches!(
-            apply(&synthetic(&ASPECT_21_MAIN), &[&ASPECT_21_MAIN]),
+            apply(&synthetic(&ASPECT_21_MAIN), &[&ASPECT_21_MAIN], None),
             Err(PatchError::UnknownEdition { .. })
         ));
     }
@@ -237,6 +549,73 @@ mod tests {
         assert_eq!(names(&[]), "none");
     }
 
+    /// The rel32 target of a 5-byte `E8`/`E9` at `from`.
+    fn target(bytes: &[u8], from: u32) -> u32 {
+        let rel = i32::from_le_bytes(bytes[1..5].try_into().unwrap());
+        from.wrapping_add(5).wrapping_add(rel as u32)
+    }
+
+    #[test]
+    fn the_borderless_code_returns_where_it_left() {
+        for build in [&SSE1, &MAIN] {
+            let jump = window_patched(build);
+            assert_eq!(jump[0], 0xE9);
+            assert_eq!(target(&jump, build.window_site), build.window_cave);
+            // The six replaced pushes are exactly the bytes up to the resume.
+            assert_eq!(build.window_resume - build.window_site, 6);
+            let cave = window_cave(build);
+            assert_eq!(&cave[23..28], &[0x68, 0, 0, 0, 0x90], "WS_POPUP|WS_VISIBLE");
+            assert_eq!(&cave[5..9], &build.get_system_metrics.to_le_bytes());
+            assert_eq!(&cave[14..18], &build.get_system_metrics.to_le_bytes());
+            assert_eq!(
+                target(&cave[28..], build.window_cave + 28),
+                build.window_resume
+            );
+            // EBX ends at 1, as the original `mov ebx,1` left it.
+            assert_eq!(fullscreen_patched(build)[8], 0x43);
+            assert_eq!(
+                &fullscreen_patched(build)[4..8],
+                &build.fullscreen_global.to_le_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn every_key_accessor_calls_the_table_lookup() {
+        for build in [&SSE1, &MAIN] {
+            for (i, site) in build.key_sites.iter().enumerate() {
+                let call = key_call(build, i);
+                assert_eq!(call[0], 0xE8);
+                assert_eq!(target(&call, *site), build.key_cave);
+            }
+            let cave = key_cave(build);
+            // movzx ecx,[esp+0xC]; movzx ecx,[ecx+TABLE]; ret
+            assert_eq!(
+                &cave[..8],
+                &[0x0F, 0xB6, 0x4C, 0x24, 0x0C, 0x0F, 0xB6, 0x89]
+            );
+            let table = build.key_cave + KEY_CODE_LEN as u32;
+            assert_eq!(&cave[8..12], &table.to_le_bytes());
+            assert_eq!(cave[12], 0xC3);
+            assert!(
+                cave[KEY_CODE_LEN..]
+                    .iter()
+                    .enumerate()
+                    .all(|(k, v)| k as u8 == *v)
+            );
+        }
+        // The caves stay apart from each other and from the pacer's.
+        let pacer = (0x0068_5030u32, 0x0068_5110u32);
+        assert!(SSE1.window_cave >= pacer.1);
+        assert!(SSE1.window_cave + WINDOW_CAVE_LEN as u32 <= SSE1.key_cave);
+        assert!(SSE1.key_cave + KEY_CAVE_LEN as u32 <= 0x0068_6000);
+        assert!(MAIN.window_cave + WINDOW_CAVE_LEN as u32 <= MAIN.key_cave);
+        assert!(MAIN.key_cave + KEY_CAVE_LEN as u32 <= 0x0068_3000);
+        assert_eq!(key_table_offset(SSE1_CLEAN), Some(0x28_5310));
+        assert_eq!(key_table_offset(MAIN_NODVD), Some(0x28_2840));
+        assert_eq!(key_table_offset(SSE1_PACER), None);
+    }
+
     #[test]
     fn the_site_table_describes_itself() {
         let rows = patch::describe(&ASPECT_21_SSE1, None).unwrap();
@@ -255,5 +634,18 @@ mod tests {
         // The two ratios share their sites, so they are checked apart.
         testing::assert_real_game("SRR_GAME_DIR", &[&PACER, &ASPECT_21_SSE1, &ASPECT_21_MAIN]);
         testing::assert_real_game("SRR_GAME_DIR", &[&ASPECT_32_SSE1, &ASPECT_32_MAIN]);
+        // Borderless and keys together with the pacer and an aspect set.
+        testing::assert_real_game(
+            "SRR_GAME_DIR",
+            &[
+                &PACER,
+                &ASPECT_21_SSE1,
+                &BORDERLESS_SSE1,
+                &KEYS_SSE1,
+                &ASPECT_21_MAIN,
+                &BORDERLESS_MAIN,
+                &KEYS_MAIN,
+            ],
+        );
     }
 }

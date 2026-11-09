@@ -11,6 +11,8 @@ Settings {
     frame_limit: None,
     stutter_fix: None,
     rumble: None,
+    display_mode: None,
+    keys: None,
     language: None,
 }
 

@@ -421,3 +421,45 @@ fn missing_directx_on_windows_shows_warning_until_present() {
     );
     assert!(ui.query_by_label_contains("Missing on this PC:").is_none());
 }
+
+#[test]
+fn display_mode_and_keys_reach_the_saved_file() {
+    let (mut ui, _, _) = open(None, true, "display-keys");
+    tab(&mut ui, "Picture");
+    ui.get_by_label("Borderless").click();
+    ui.run();
+    assert_eq!(
+        ui.state().form.display_mode,
+        srr_launcher::config::DisplayMode::Borderless
+    );
+    tab(&mut ui, "Controls");
+    assert!(
+        ui.query_by_label_contains("Accelerate: A, Brake / reverse: Z")
+            .is_some()
+    );
+    let field = ui.get_by_role_and_label(Role::TextInput, "Keyboard keys");
+    assert_eq!(
+        testing::description(&field).as_deref(),
+        Some(config::option("keys").description)
+    );
+    field.click();
+    ui.run();
+    ui.get_by_role_and_label(Role::TextInput, "Keyboard keys")
+        .type_text("accelerate=up");
+    ui.run();
+    assert_eq!(ui.state().form.keys, "accelerate=up");
+    assert!(
+        ui.query_by_label_contains("Accelerate: Up, Brake / reverse: Z")
+            .is_some()
+    );
+    let saved = ui.state().form.save("", None);
+    assert!(saved.contains("display_mode = borderless"), "{saved}");
+    assert!(saved.contains("keys = accelerate=up"), "{saved}");
+    // Two actions on one key: said in place, in the window's words.
+    ui.state_mut().form.keys = "accelerate=z".into();
+    ui.run();
+    assert!(
+        ui.query_by_label_contains("z is both accelerate and brake")
+            .is_some()
+    );
+}

@@ -92,8 +92,8 @@ From the `distrobox-gaming` install history (2026-05-01 through 2026-08-21):
 10. **A wine upgrade once regressed the game to a black screen**
     (11.12→11.13, 2026-07-12; pinned to a wine-11.8 sidecar). The later
     iGPU finding (#7) is the more likely true cause. This launcher bundles
-    the same pinned Kron4ek Wine 11.20 WoW64 build the other REA launchers
-    use, so system wine upgrades cannot change the runner mid-flight.
+    the same pinned Kron4ek Wine WoW64 build the other REA launchers
+    use (11.21 since v0.4.2), so system wine upgrades cannot change the runner mid-flight.
 
 ## Timing: the two stacked stutter bugs
 
@@ -189,7 +189,7 @@ its key list confirms the config.ini schema (including `RefreshRate`,
 Anti-aliasing stays off (`AntiAliasingLevel=0`), matching the proven
 configuration; multisample stability under DXVK is untested.
 
-## Keyboard keys (issue #1, 2026-11-03, paused)
+## Keyboard keys (issue #1, 2026-11-03; resolved 2026-11-09)
 
 A player asked to change the keyboard keys. What is established:
 
@@ -223,11 +223,81 @@ A player asked to change the keyboard keys. What is established:
   (A Z , . Space S X LCtrl Tab O P = `1E 2C 33 34 39 1F 2D 1D 0F 18 19`)
   packed nor as 16-bit words.
 
-Paused by owner decision on 2026-11-03; issue #1 stays open as a feature
-request. To resume: find the binding objects' constructors (or break on
-0x578160 in a race and walk back from the caller), then decide between
-patching the key source in the private copy and a launcher option.
-Nothing ships until a changed key is seen to work in a race.
+Paused by owner decision on 2026-11-03, resumed 2026-11-09 with a
+different approach: the key source does not need to be found. Every key
+read goes through four accessors of the input object, each loading the
+asked-for DirectInput code with `movzx ecx, byte [esp+8]` (5 bytes):
+
+| Accessor (vtable slot) | SSE1 | NoDVD | Reads |
+| --- | --- | --- | --- |
+| `+0x24` | `0x578146` | `0x577086` | last frame's state (`+0x139`) |
+| `+0x28` (`IsKeyDown`) | `0x578178` | `0x5770B8` | this frame's state (`+0x39`) |
+| `+0x20` | `0x5781C3` | `0x577103` | just pressed (`+0x339` set, `+0x139` clear) |
+| `+0x1C` | `0x578203` | `0x577143` | just released |
+
+The keys set (`patches::KEYS_*`) turns each of those loads into a call to
+a 16-byte routine in `.text` slack (`movzx ecx,[esp+0xC]; movzx
+ecx,[ecx+TABLE]; ret`) followed by a 256-byte table, written by the
+launcher from `keys` (`keys::KeyMap::table`): entry K is the key whose
+state the game gets when it asks for K. Moved actions answer from their
+new key; every other entry is itself, so menus and pause are untouched.
+Caves: SSE1 `0x685300` (after the pacer's `0x685030..0x68510F`), NoDVD
+`0x682830`; both lie past `.text`'s VirtualSize but inside its raw data
+and its page-rounded mapping (the SDK checks they are zero and in an
+executable section; Wine maps them, verified below).
+
+Verified 2026-11-09, headless (gamescope 1920x1080, Wine 11.21, DXVK,
+the owner's full rip read-only) in a Safari race of the Amateur league:
+with `keys = accelerate=up`, holding A for 4 s left the car at 0 mph and
+holding Up for 5 s took it to 59–61 mph in 3rd gear, on the SSE1 build
+(stutter fix on, with and without borderless) and on the NoDVD build;
+without the option A accelerates (58 mph). Menus were driven with
+Return/Escape throughout with the patch in place.
+
+## Borderless (issue #4, 2026-11-09)
+
+A player asked for a borderless window. `RunWindowed=1` does nothing
+because the game never reads it (no such string in either executable,
+ASCII or UTF-16; its config keys are UTF-16 and only the .NET tool
+writes `RunWindowed`). The device setup `0x58E350` (SSE1; NoDVD
+`0x58BCA0`) stores 1 into the "fullscreen" global (`0x9E0CBC`; NoDVD
+`0x9CDCBC`) right before `Direct3DCreate9`, and fills
+`D3DPRESENT_PARAMETERS` at `0x7E7194` with `Windowed = (global == 0)` and
+`FullScreen_RefreshRateInHz = [0xA1344C]` (the configured refresh). The
+window is `CreateWindowExA(0, "SegaClass", "SEGA Rally", 0, 0, 0, 0, 0,
+GetDesktopWindow(), …)`: style 0 and size 0, left to Direct3D's
+fullscreen switch. Nothing in the game resizes or restyles it
+(no `SetWindowPos`/`MoveWindow`/`SetWindowLong` imports).
+
+The borderless set (`patches::BORDERLESS_*`):
+
+1. `mov ebx,1 / push 0x20 / mov [global],ebx` →
+   `xor ebx,ebx / mov [global],ebx / inc ebx / push 0x20 / nop nop`: the
+   global is 0, so `Windowed = 1`; EBX is 1 again for the fields that
+   follow (back buffer count, swap effect, auto depth stencil).
+2. `mov edx,[refresh]` → `xor edx,edx`: refresh 0, which Direct3D
+   requires for a window.
+3. The six pushes before `CreateWindowExA` (`push eax` parent, five zero
+   pushes) → a jump to a 33-byte cave (SSE1 `0x685200`, NoDVD
+   `0x682800`) that pushes the parent, `GetSystemMetrics(SM_CYSCREEN)`,
+   `GetSystemMetrics(SM_CXSCREEN)`, 0, 0 and `WS_POPUP | WS_VISIBLE`, then
+   jumps back to the window-name push.
+
+A windowed Direct3D 9 device presents its back buffer (the game's
+resolution) stretched to the window, so a smaller resolution is scaled to
+the screen. Under plain Wine the launcher sizes the isolated desktop to
+the screen in this mode (the game's window then covers it).
+
+Verified 2026-11-09, headless (same harness as the keys): the unpatched
+run logs DXVK's `Setting display mode: 1920x1080@60` (exclusive
+fullscreen); the borderless runs never switch modes, and with the game at
+1280x720 DXVK creates the 1280x720 device with a 1920x1080 swap chain
+(the screen-sized window) — title, menus and a race rendered full screen,
+directly in gamescope and inside `explorer /desktop=SegaRally,1920x1080`,
+on SSE1 (with the stutter fix) and NoDVD. Not verified: native Windows
+(DPI virtualisation scales `GetSystemMetrics` for this non-DPI-aware game,
+so the window still covers the screen) and multi-monitor Windows (the
+window covers the primary monitor).
 
 ## Pad rumble (issue #2, 2026-11-05)
 

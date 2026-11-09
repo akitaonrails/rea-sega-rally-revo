@@ -24,6 +24,13 @@
 # Values: WIDTHxHEIGHT or auto.
 #resolution = 3840x2160
 
+# Fullscreen is the game's own (it switches the screen to the resolution).
+# Borderless puts the game in a window without borders over the whole
+# screen: no display-mode switch, quick Alt+Tab; a smaller resolution is
+# scaled up.
+# Values: fullscreen or borderless.
+#display_mode =
+
 # The game's detail preset: Normal is the 2007 look, High sharper shadows
 # and track detail, Ultra every slider at maximum.
 # Values: normal, high or ultra.
@@ -48,6 +55,15 @@
 # game's vibration switch; your pad bindings are kept.
 # Values: on or off.
 #rumble =
+
+# Your own keys as action=key pairs separated by commas, e.g. accelerate=up,
+# brake=down; empty keeps the manual's keys. Actions: accelerate, brake,
+# steer_left, steer_right, handbrake, shift_up, shift_down, camera,
+# driver_names, class_up, class_down. Keys are named by their place on a US
+# keyboard: a-z, 0-9, up, down, left, right, space, left_shift, right_ctrl,
+# comma, numpad_8 and so on (the README lists them all).
+# Values: text.
+#keys = accelerate=up, brake=down, steer_left=left, steer_right=right
 
 # The language of the game's menus.
 # Values: English, French, German, Spanish, Italian or Polish.

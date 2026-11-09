@@ -643,3 +643,26 @@ Not yet verified: a driven race under 11.21 + DXVK. The fleet has been
 sensitive to Wine version changes (an 11.13 upgrade black-screened the
 game in the distrobox-gaming setup), so drive one race before tagging the
 release.
+
+## 2026-11-09 — borderless and keyboard keys (issues #4, #1)
+
+Headless, in the `gaming` distrobox: release `SRRLauncher.exe` with the
+AppImage v0.4.2's Wine 11.21 and DXVK, a throwaway prefix and `HOME`
+under `.work/live/`, `env -i` with only the test's variables, no audio
+device, `gamescope --backend headless` at 1920x1080, the owner's full rip
+read-only as drive `D:`, XTest keys. Route to a race: title → Return →
+Championship → Amateur → AZA Challenge → Safari → car → race.
+
+| Check | Result |
+| --- | --- |
+| `--setup --display-mode borderless --keys accelerate=up --resolution 1280x720` | `SEGA Rally_SSE1.exe: patches pacer + borderless + keys`, `SEGA Rally.exe: patches borderless + keys`; the log names the keys |
+| SSE1 (stutter fix on), in gamescope | VERIFIED: no `Setting display mode`; DXVK device 1280x720, swap chain 1920x1080; A held 4 s: 0 mph; Up held 5 s: 61 mph |
+| NoDVD `SEGA Rally.exe`, in gamescope | VERIFIED: same, 61 mph on Up, 0 on A |
+| SSE1 inside `explorer /desktop=SegaRally,1920x1080` (the plain-Wine path) | VERIFIED: swap chain 1920x1080, Up 47 mph after 5 s, A nothing |
+| Clean SSE1 with borderless + keys and no pacer (caves past `.text` VirtualSize 0x284028) | VERIFIED: runs, Up 61 mph |
+| Default settings (control) | DXVK `Setting display mode: 1920x1080@60`; A held 5 s: 58 mph |
+| `SRR_GAME_DIR=… cargo test real_game -- --ignored` | VERIFIED: every set alone and together (pacer, aspect, borderless, keys) on both builds |
+
+Not checked: native Windows, a pad and changed keys at once, a 21:9
+screen in borderless mode.
+

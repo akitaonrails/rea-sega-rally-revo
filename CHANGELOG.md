@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Your own keyboard keys** (issue #1): the new `keys` option (Controls:
+  Keyboard keys) moves any of the game's eleven keyboard actions to
+  another key, e.g. `accelerate=up, brake=down, steer_left=left,
+  steer_right=right`. The private copy's key lookups read through a
+  table, so keys you don't move, and the menus, work as before. Clean
+  `SEGA Rally_SSE1.exe` and NoDVD `SEGA Rally.exe`.
+- **Borderless display mode** (issue #4): `display_mode = borderless`
+  (Picture: Display mode) runs the game in a borderless window that
+  covers the screen instead of its exclusive fullscreen: no display-mode
+  switch, quick Alt+Tab, a smaller resolution scaled up. The game forced
+  fullscreen in code (it never read `RunWindowed`); the private copy now
+  asks Direct3D for a window and creates it screen-sized without borders.
+  Under Linux the Wine desktop covers the screen in this mode.
+
 ## v0.4.2 - 2026-11-07
 
 - **The AppImage's bundled Wine is 11.21, which fixes the startup crash on

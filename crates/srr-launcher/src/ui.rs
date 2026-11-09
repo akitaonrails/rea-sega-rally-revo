@@ -16,10 +16,11 @@ use rea_launcher_ui::spec::{RowOptions, mark_rendered, spec_row_with};
 use rea_launcher_ui::theme::{body, decal, semibold};
 use rea_launcher_ui::widgets::{self, Crop, LookCard};
 use rea_launcher_ui::window::Layout;
-use srr_launcher::config::{self, Aspect, FrameLimit, Quality};
+use srr_launcher::config::{self, Aspect, DisplayMode, FrameLimit, KeyMap, Quality};
 use srr_launcher::directx;
 use srr_launcher::edition::{self, GameEditions};
 use srr_launcher::form::{self, Form, Look, Picture};
+use srr_launcher::keys;
 
 use crate::palette::{BLUE, ERROR, INK, MUTED, ORANGE};
 
@@ -579,6 +580,11 @@ impl Window {
         if let Some(text) = table_row(ui, "vsync", cfg::on_off(picture.vsync), None) {
             picture.vsync = text == cfg::on_off(true);
         }
+        if let Some(text) = table_row(ui, "display_mode", self.form.display_mode.key(), None)
+            && let Some(mode) = DisplayMode::parse(&text)
+        {
+            self.form.display_mode = mode;
+        }
         self.form.edit_picture(picture, screen);
     }
 
@@ -621,6 +627,28 @@ impl Window {
         if let Some(result) = &self.rumble_test {
             ui.label(egui::RichText::new(result).font(body(13.0)).color(ORANGE));
         }
+        ui.add_space(12.0);
+
+        widgets::heading(ui, "Keyboard");
+        if let Some(text) = table_row(ui, "keys", &self.form.keys, None) {
+            self.form.keys = text;
+        }
+        let keys = match KeyMap::parse(&self.form.keys) {
+            Ok(keys) => {
+                let now: Vec<String> = keys::ACTIONS
+                    .iter()
+                    .zip(keys.layout())
+                    .map(|((_, label, _), code)| format!("{label}: {}", keys::label(code)))
+                    .collect();
+                egui::RichText::new(format!("Your keys: {}.", now.join(", "))).color(INK)
+            }
+            Err(needs) => egui::RichText::new(format!(
+                "These keys can't be used: the field needs {needs}. Until it is fixed the \
+                 game keeps the manual's keys."
+            ))
+            .color(ERROR),
+        };
+        ui.label(keys.font(body(13.0)));
         ui.add_space(10.0);
         widgets::note(
             ui,

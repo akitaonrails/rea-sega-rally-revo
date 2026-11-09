@@ -82,8 +82,11 @@ as `distrobox enter gaming -- sh -c 'cd /absolute/path && …'`.
   issue link; never patch them.
 - Only the private runtime copies are patched, always from the game
   folder's untouched executable: the stutter fix (`patches::PACER`, the
-  clean-room set, clean SSE1 only, result hash verified) and the ultra-wide aspect sets.
-  Everything else is configuration the game reads.
+  clean-room set, clean SSE1 only, result hash verified), the ultra-wide
+  aspect sets, and, when chosen, the borderless set (`display_mode`) and
+  the keys set (`keys`; its 256-byte table is written from the option),
+  both for the clean SSE1 and the NoDVD build only. Everything else is
+  configuration the game reads.
 - `config.ini` is seeded complete only when missing; afterwards only the
   keys of options set in `launcher.cfg` are written (`ini::Owned`). Never
   rewrite `[Audio]`. In `[GameController]` the only thing the launcher

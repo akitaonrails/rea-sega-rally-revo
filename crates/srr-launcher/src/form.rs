@@ -5,7 +5,7 @@ use rea_launcher::cfg::{self, spec};
 pub use rea_launcher::display::STEAM_DECK_SCREEN;
 
 pub use crate::config::Look;
-use crate::config::{self, FrameLimit, Quality, Settings};
+use crate::config::{self, DisplayMode, FrameLimit, Quality, Settings};
 
 /// The picture values a look sets; `resolution: None` is Auto (the
 /// screen's size).
@@ -54,6 +54,9 @@ pub struct Form {
     pub frame_limit: FrameLimit,
     pub stutter_fix: bool,
     pub rumble: bool,
+    pub display_mode: DisplayMode,
+    /// The `keys` text as typed (checked by `keys::KeyMap::parse`).
+    pub keys: String,
     pub language: String,
 }
 
@@ -75,6 +78,8 @@ impl Form {
             frame_limit: settings.effective_frame_limit(),
             stutter_fix: settings.effective_stutter_fix(),
             rumble: settings.effective_rumble(),
+            display_mode: settings.effective_display_mode(),
+            keys: settings.effective_keys().text(),
             language: settings.effective_language().to_string(),
         }
     }
@@ -155,6 +160,8 @@ impl Form {
             ("frame_limit", self.frame_limit.key().to_string()),
             ("stutter_fix", cfg::on_off(self.stutter_fix).to_string()),
             ("rumble", cfg::on_off(self.rumble).to_string()),
+            ("display_mode", self.display_mode.key().to_string()),
+            ("keys", self.keys.trim().to_string()),
             ("language", self.language.clone()),
         ];
         let text = spec::retire_removed(text, config::OPTIONS);

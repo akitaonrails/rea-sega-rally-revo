@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 
+pub use crate::keys::KeyMap;
+
 use rea_launcher_win32::report::{self, Run};
 
 use rea_launcher::cfg::{
@@ -75,6 +77,30 @@ impl Quality {
 }
 
 /// DXVK-side frame limiter. The community Lutris setup ships
+/// How the game takes the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayMode {
+    /// The game's own exclusive fullscreen.
+    Fullscreen,
+    /// A screen-sized window without borders (`patches::BORDERLESS_*`).
+    Borderless,
+}
+
+impl DisplayMode {
+    pub fn key(self) -> &'static str {
+        match self {
+            DisplayMode::Fullscreen => "fullscreen",
+            DisplayMode::Borderless => "borderless",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<DisplayMode> {
+        [DisplayMode::Fullscreen, DisplayMode::Borderless]
+            .into_iter()
+            .find(|mode| mode.key().eq_ignore_ascii_case(text))
+    }
+}
+
 /// `d3d9.maxFrameRate = 60`; with the pacer fix applied the limit can be
 /// lifted or raised on high-refresh displays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -187,6 +213,8 @@ const LOOKS: &[(&str, &str)] = &[
     ("custom", "Custom"),
 ];
 const QUALITIES: &[(&str, &str)] = &[("normal", "Normal"), ("high", "High"), ("ultra", "Ultra")];
+const DISPLAY_MODES: &[(&str, &str)] =
+    &[("fullscreen", "Fullscreen"), ("borderless", "Borderless")];
 const FRAME_LIMITS: &[(&str, &str)] = &[("60", "60 fps"), ("120", "120 fps"), ("off", "Off")];
 const LANGUAGE_CHOICES: &[(&str, &str)] = &[
     ("English", "English"),
@@ -233,6 +261,13 @@ pub const OPTIONS: &[OptionSpec] = &[
     )
     .with_example("3840x2160"),
     OptionSpec::new(
+        "display_mode",
+        Kind::Choice(DISPLAY_MODES),
+        "Display mode",
+        "Fullscreen is the game's own (it switches the screen to the resolution). Borderless puts the game in a window without borders over the whole screen: no display-mode switch, quick Alt+Tab; a smaller resolution is scaled up.",
+    )
+    .with_aliases(&["display-mode"]),
+    OptionSpec::new(
         "quality",
         Kind::Choice(QUALITIES),
         "Quality",
@@ -264,6 +299,13 @@ pub const OPTIONS: &[OptionSpec] = &[
         "Pad rumble",
         "The game vibrates the pad in races (its own default). Off writes the game's vibration switch; your pad bindings are kept.",
     ),
+    OptionSpec::new(
+        "keys",
+        Kind::Text,
+        "Keyboard keys",
+        "Your own keys as action=key pairs separated by commas, e.g. accelerate=up, brake=down; empty keeps the manual's keys. Actions: accelerate, brake, steer_left, steer_right, handbrake, shift_up, shift_down, camera, driver_names, class_up, class_down. Keys are named by their place on a US keyboard: a-z, 0-9, up, down, left, right, space, left_shift, right_ctrl, comma, numpad_8 and so on (the README lists them all).",
+    )
+    .with_example("accelerate=up, brake=down, steer_left=left, steer_right=right"),
     OptionSpec::new(
         "language",
         Kind::Choice(LANGUAGE_CHOICES),
@@ -369,6 +411,8 @@ pub struct Settings {
     pub frame_limit: Option<FrameLimit>,
     pub stutter_fix: Option<bool>,
     pub rumble: Option<bool>,
+    pub display_mode: Option<DisplayMode>,
+    pub keys: Option<KeyMap>,
     pub language: Option<String>,
 }
 
@@ -481,6 +525,10 @@ impl Settings {
             ("frame_limit", Value::Choice(limit)) => self.frame_limit = FrameLimit::parse(limit),
             ("stutter_fix", Value::Toggle(on)) => self.stutter_fix = Some(on),
             ("rumble", Value::Toggle(on)) => self.rumble = Some(on),
+            ("display_mode", Value::Choice(mode)) => self.display_mode = DisplayMode::parse(mode),
+            ("keys", Value::Text(text)) => {
+                self.keys = Some(KeyMap::parse(text).map_err(Rejected::needs)?)
+            }
             ("language", Value::Choice(language)) => self.language = Some(language.to_string()),
             _ => return Err(Rejected::Unknown),
         }
@@ -531,6 +579,8 @@ impl Settings {
             frame_limit: over.frame_limit.or(base.frame_limit),
             stutter_fix: over.stutter_fix.or(base.stutter_fix),
             rumble: over.rumble.or(base.rumble),
+            display_mode: over.display_mode.or(base.display_mode),
+            keys: over.keys.or(base.keys),
             language: over.language.or(base.language),
         }
     }
@@ -560,6 +610,15 @@ impl Settings {
     /// The pad-vibration choice: unset keeps the game's own value.
     pub fn effective_rumble(&self) -> bool {
         self.rumble.unwrap_or(true)
+    }
+
+    pub fn effective_display_mode(&self) -> DisplayMode {
+        self.display_mode.unwrap_or(DisplayMode::Fullscreen)
+    }
+
+    /// The player's keys; unset is the manual's.
+    pub fn effective_keys(&self) -> KeyMap {
+        self.keys.clone().unwrap_or_default()
     }
 
     pub fn effective_language(&self) -> &str {
@@ -818,7 +877,7 @@ mod tests {
             assert!(usage.contains(&option.flag_name(KeyStyle::Underscore)));
         }
         assert!(!usage.contains("--aspect") && !usage.contains("--fullscreen"));
-        assert!(!template().contains("aspect =") && !template().contains("fullscreen"));
+        assert!(!template().contains("aspect =") && !template().contains("#fullscreen ="));
         for switch in SWITCHES {
             assert!(usage.contains(switch), "{switch}");
         }
