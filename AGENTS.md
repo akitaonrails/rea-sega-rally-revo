@@ -48,6 +48,10 @@ as `distrobox enter gaming -- sh -c 'cd /absolute/path && …'`.
   (`ad84ecea…2ba391d7`); the launcher identifies it by SHA-256 and runs it
   (unpatched, or with the aspect fix) when the stutter fix cannot run.
   We never write a crack ourselves.
+- **2026-11-09 — the NoDVD exe also takes the borderless and keyboard
+  patches** (owner decision): `display_mode = borderless` and `keys` apply
+  to it as to the SSE1 exe. They touch window and input code only, never
+  the bytes that make it a NoDVD build.
 - **2026-11-02 — DirectX 9 files: one button instead of winetricks.** The
   DirectX End-User Runtime's licence does not let us bundle its DLLs
   (`docs/RESEARCH.md`), so the window downloads Microsoft's package on

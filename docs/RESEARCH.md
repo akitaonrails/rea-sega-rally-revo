@@ -397,7 +397,9 @@ Windows Update never installs them.
   unpatched, or with the aspect fix, when the stutter fix cannot run. We
   never write, ship, download or apply a crack, and never tell a player
   how to get such a build. The waiver line is in `.rea-check-waivers`
-  (`drm-exception`).
+  (`drm-exception`). Since 2026-11-09 (owner decision, `AGENTS.md`) the
+  borderless and keyboard patches apply to it too: window and input code
+  only, never the NoDVD bytes.
 
 ## Old-game trouble spots
 
