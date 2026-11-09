@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.5.0 - 2026-11-09
+
 - **Your own keyboard keys** (issue #1): the new `keys` option (Controls:
   Keyboard keys) moves any of the game's eleven keyboard actions to
   another key, e.g. `accelerate=up, brake=down, steer_left=left,
