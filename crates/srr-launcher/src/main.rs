@@ -168,6 +168,9 @@ mod app {
     /// Writes the game's install values under `HKLM\SOFTWARE\Sega\SEGA
     /// Rally` (its 32-bit view), or its HKCU VirtualStore twin when native
     /// Windows refuses HKLM without elevation; 32-bit games read either.
+    // Deprecated in SDK v0.6.0; replaced in the next commit (HKCU and
+    // REA_REGISTRY).
+    #[allow(deprecated)]
     fn seed_game_registry(values: &[gamecfg::RegValue]) -> Result<&'static str, String> {
         let (key, place) = Key::machine_or_virtual_store(r"SOFTWARE\Sega\SEGA Rally")?;
         for value in values {

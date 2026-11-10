@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Updated rea-launcher-sdk to v0.6.0.
+
 ## v0.5.1 - 2026-11-09
 
 - **Steadier frame pacing on Windows** (Quiver player feedback, issue #6):

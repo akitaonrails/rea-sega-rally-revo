@@ -8,7 +8,8 @@ by `launcher-ci`, input `conformance`, on by default) tests a launcher
 against the rules below that can be read from its files: golden snapshots,
 the SDK's audience and instance guard, a draft for every fix of our own,
 the README outline, AGENTS.md, SDK pins, lld, the option tests, the quit
-paths in `RUNTIME_NOTES.md`, the issue forms, DRM exceptions.
+paths in `RUNTIME_NOTES.md`, the issue forms, DRM exceptions, innoextract's
+pins and credit.
 `launcher-check --explain RULE` gives the reason and the fix. Run it before
 every commit and before a release; an error blocks both. An exception is
 an owner decision, recorded as a line `rule: reason` in the launcher's
@@ -149,7 +150,8 @@ that: if a step could be done by the launcher, the launcher does it.
   bundled or fetched by the launcher (`docs/playbooks/community-components.md`),
   configuration is generated, optional packs download with one button.
 - **Self-contained.** The player installs the package and points it at the
-  game. No third-party patchers, winetricks commands typed by hand, DLL
+  game (or at the game's installer: the launcher unpacks it with the bundled
+  innoextract and never runs it, `docs/playbooks/installers.md`). No third-party patchers, winetricks commands typed by hand, DLL
   overrides, compatibility modes, codec packs or registry edits.
 - **Windows first, easy on Linux.** A Windows build that also runs under
   Proton or Wine with nothing extra, plus an AppImage with a portable Wine
@@ -200,8 +202,16 @@ that: if a step could be done by the launcher, the launcher does it.
   (whichever exist for the game).
   An unknown build is refused with its SHA-256 and a link to the issue
   template so players can report it.
-- **No admin rights.** Prefer HKCU or the VirtualStore; no system-wide
-  installs.
+- **No admin rights.** No system-wide installs, and the launcher writes
+  only HKCU. Never count on the HKCU VirtualStore: the game sees it only
+  while UAC registry virtualization is on for its process, which Windows
+  doesn't promise (CMR1 crashed on a player's Windows 11,
+  rea-colin-mcrae#6). A game that reads HKLM gets its key from HKCU
+  through the close hook DLL's `REA_REGISTRY` redirect; the launcher
+  reads every value back (`reg::write_verified`) and Play and `--check`
+  stop with the reason when the game wouldn't see them
+  (`docs/playbooks/new-launcher.md`, "Registry"; `launcher-check` rule
+  `virtual-store`).
 - **Native launchers** (the game runs natively or in an emulator we ship,
   like Screamer in DOSBox) skip the Wine-only rules: Proton, DLL overrides,
   winebus, `wine-test` for i686. They ship native Windows and Linux builds,
