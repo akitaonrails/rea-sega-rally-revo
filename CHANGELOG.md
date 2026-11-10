@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Steadier frame pacing on Windows** (Quiver player feedback, issue #6):
+  the game's simulation thread waits for its 16 ms beat with `Sleep(4)`,
+  and since Windows 10 2004 that sleep lasts a whole 15.6 ms timer tick
+  unless the game asks for a finer timer, which it never does in play. The
+  beat then ran on a 15.6 ms grid and doubled to 31 ms about every 0.65 s:
+  a hitch roughly once a second, which the stutter fix alone could not
+  remove (Wine's timer is always fine, so Linux never showed it). With the
+  stutter fix, the private copy now holds a 1 ms timer while the
+  simulation thread runs and polls `Sleep(1)`: measured, the beat stays
+  within 15.1–17.2 ms and no frame shows a keyframe more than 17 ms old
+  (Windows timing emulated: 62 such frames a minute before, 0 after).
+  The launcher log reads `patches pacer + timer`.
+
 ## v0.5.0 - 2026-11-09
 
 - **Your own keyboard keys** (issue #1): the new `keys` option (Controls:

@@ -75,7 +75,7 @@ notes: [
 
 ## patches
 SEGA Rally.exe: pristine
-SEGA Rally_SSE1.exe: pacer
+SEGA Rally_SSE1.exe: pacer + timer
   VA 0x595660: E9 5B FA 0E 00  (R1: spawn 0x595660 jumps to the guard (no new pacer while handle 0xB420A0 is set))
   VA 0x595249: E8 E2 FD 0E 00 A0 A4 20 B4 00 84 C0 EB 22 CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC  (R2/R4: pacer start stores master ms through the monotonic store)
   VA 0x595323: 89 4C 24 18 E8 0C FD 0E 00 EB 07 CC CC CC CC CC CC CC  (R2/R3: pacer tick stores master ms (not +16), and only while no frame hook ran in the last 100 ms)
@@ -87,6 +87,10 @@ SEGA Rally_SSE1.exe: pacer
   VA 0x685030: 53 51 31 DB EB 09 CC CC 53 51 BB 01 00 00 00 68 80 34 A1 00 FF 15 14 62 68 00 E8 41 48 F0 FF 6A 00 68 E8 03 00 00 FF 35 2C 09 95 00 FF 35 28 09 95 00 E8 89 A8 E2 FF 85 DB 74 0D 89 C1 2B 0D 60 B9 B4 00 83 F9 64 72 29 89 C3 89 D1 A1 D8 70 96 00 8B 15 DC 70 96 00 39 D1 72 21 77 04 39 C3 76 1B F0 0F C7 0D D8 70 96 00 75 EC 89 D8 89 CA EB 0B A1 D8 70 96 00 8B 15 DC 70 96 00 52 50 68 80 34 A1 00 FF 15 18 62 68 00 58 5A 59 5B C3 CC CC 83 7E 1C 00 75 0A 51 8D 04 24 50 E9 95 05 F1 FF C6 46 22 01 B0 01 C3 CC CC CC CC CC CC CC CC CC E8 4B FF FF FF A3 60 B9 B4 00 55 8B EC 83 E4 F8 E9 01 E1 F4 FF CC CC CC CC CC CC CC CC CC CC CC E8 2B FF FF FF A3 60 B9 B4 00 C3 CC CC CC CC CC  (R1-R4: cave code (store_race_clock/pacer_store, spawn_guard, frame_hook) in .text slack)
   0x000218: 00 50 28 00  (.text VirtualSize 0x284028 -> 0x285000 so the cave is inside the declared section)
   0x000268: 64 C9 43 00  (.data VirtualSize 0x43C95C -> 0x43C964 to declare the u32 state at 0xB4B960 (zero-initialised))
+  VA 0x5951B0: E9 8B FF 0E 00 90  (simulation thread entry: jump to the cave for timeBeginPeriod(1))
+  VA 0x5952D7: 6A 01  (simulation thread wait: Sleep(4) becomes Sleep(1))
+  VA 0x5953CD: E9 82 FD 0E 00  (simulation thread exit: jump to the cave for timeEndPeriod(1))
+  VA 0x685140: 6A 01 FF 15 E4 62 68 00 55 8B EC 83 E4 F8 E9 63 00 F1 FF CC 6A 01 FF 15 DC 62 68 00 68 CC BD 6C 00 E9 6C 02 F1 FF  (timer cave: timeBeginPeriod(1)/timeEndPeriod(1) around the simulation thread)
 
 ## registry (HKLM\SOFTWARE\Sega\SEGA Rally, 32-bit view)
 installdir = "C:\\Users\\José\\AppData\\Local\\SRRLauncher\\SegaRally\\"

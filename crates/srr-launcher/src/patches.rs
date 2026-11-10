@@ -10,6 +10,9 @@
 //!   problem analysis only). The result is checked against its SHA-256.
 //!   The community-fixed build ([`SSE1_PACER`]) is recognised as already
 //!   fixed and never patched.
+//! - [`TIMER`]: with the stutter fix, the simulation thread gets a 1 ms
+//!   timer (`timeBeginPeriod(1)` while it runs) and polls `Sleep(1)`, so
+//!   its 16 ms beat holds on Windows too.
 //! - The aspect sets: the renderer's 16:9 constant (`39 8E E3 3F`) in its
 //!   two aspect tables becomes 21:9 or 32:9 for ultra-wide resolutions,
 //!   the PCGamingWiki/WSGF hex edit at this build's own offsets.
@@ -374,6 +377,102 @@ pub const BORDERLESS_MAIN: PatchSet = borderless_set!(MAIN, &[MAIN_NODVD]);
 pub const KEYS_SSE1: PatchSet = keys_set!(SSE1, &[SSE1_CLEAN]);
 pub const KEYS_MAIN: PatchSet = keys_set!(MAIN, &[MAIN_NODVD]);
 
+/// The simulation thread (`0x5951B0`, the game's "Simulation Thread"
+/// running the Clock, Keyframe and Network tasks) waits for its 16 ms beat
+/// by polling `Sleep(4)`. The game never asks for a fine timer during
+/// play (its only `timeBeginPeriod` belongs to video playback), and since
+/// Windows 10 2004 another program's request no longer counts, so on
+/// Windows each `Sleep(4)` lasts a 15.6 ms timer tick: the beat runs late
+/// and doubles to 31 ms about once every 0.65 s (`docs/RUNTIME_NOTES.md`,
+/// 2026-11-09). Wine's timer is always fine, which is why Linux never
+/// showed it.
+const SIM_THREAD: u32 = 0x0059_51B0;
+/// `push ebp / mov ebp,esp / and esp,-8`: the thread's prologue.
+const SIM_PROLOGUE: [u8; 6] = [0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF8];
+/// `push 4` before `call [Sleep]` in the thread's wait loop.
+const SIM_WAIT: u32 = 0x0059_52D7;
+/// `push 0x6CBDCC` (its exit message), where the thread ends.
+const SIM_EXIT: u32 = 0x0059_53CD;
+const SIM_EXIT_PUSH: [u8; 5] = [0x68, 0xCC, 0xBD, 0x6C, 0x00];
+/// IAT slots of `timeBeginPeriod` and `timeEndPeriod` (WINMM).
+const TIME_BEGIN_PERIOD: u32 = 0x0068_62E4;
+const TIME_END_PERIOD: u32 = 0x0068_62DC;
+/// `.text` slack between the pacer's cave (ends 0x685110) and the window cave.
+pub const TIMER_CAVE: u32 = 0x0068_5140;
+pub const TIMER_CAVE_LEN: usize = 38;
+/// Where the exit routine starts inside the cave.
+const TIMER_END_AT: usize = 20;
+
+const fn sim_entry_patched() -> [u8; 6] {
+    let j = branch(0xE9, SIM_THREAD, TIMER_CAVE);
+    [j[0], j[1], j[2], j[3], j[4], 0x90]
+}
+
+const fn sim_exit_patched() -> [u8; 5] {
+    branch(0xE9, SIM_EXIT, TIMER_CAVE + TIMER_END_AT as u32)
+}
+
+/// `timeBeginPeriod(1)`, the prologue, back to the thread (19 bytes);
+/// `int3`; then `timeEndPeriod(1)`, the exit push, back (18 bytes).
+const fn timer_cave() -> [u8; TIMER_CAVE_LEN] {
+    let b = le(TIME_BEGIN_PERIOD);
+    let e = le(TIME_END_PERIOD);
+    let back = branch(0xE9, TIMER_CAVE + 14, SIM_THREAD + 6);
+    let end = TIMER_CAVE + TIMER_END_AT as u32;
+    let out = branch(0xE9, end + 13, SIM_EXIT + 5);
+    let p = SIM_PROLOGUE;
+    let x = SIM_EXIT_PUSH;
+    [
+        0x6A, 0x01, 0xFF, 0x15, b[0], b[1], b[2], b[3], // timeBeginPeriod(1)
+        p[0], p[1], p[2], p[3], p[4], p[5], // the replaced prologue
+        back[0], back[1], back[2], back[3], back[4], // jmp 0x5951B6
+        0xCC, 0x6A, 0x01, 0xFF, 0x15, e[0], e[1], e[2], e[3], // timeEndPeriod(1)
+        x[0], x[1], x[2], x[3], x[4], // the replaced push
+        out[0], out[1], out[2], out[3], out[4], // jmp 0x5953D2
+    ]
+}
+
+const ZERO_TIMER_CAVE: [u8; TIMER_CAVE_LEN] = [0; TIMER_CAVE_LEN];
+
+/// The simulation thread's 1 ms timer, part of the stutter fix (clean SSE1).
+pub const TIMER: PatchSet = PatchSet {
+    name: "timer",
+    summary: "The simulation thread keeps its 16 ms beat on Windows: a 1 ms timer while it runs, Sleep(1) polling",
+    editions: &[SSE1_CLEAN],
+    sites: &[
+        PatchSite {
+            at: At::Va(SIM_THREAD),
+            original: &SIM_PROLOGUE,
+            patched: &sim_entry_patched(),
+            note: "simulation thread entry: jump to the cave for timeBeginPeriod(1)",
+        },
+        PatchSite {
+            at: At::Va(SIM_WAIT),
+            original: &[0x6A, 0x04],
+            patched: &[0x6A, 0x01],
+            note: "simulation thread wait: Sleep(4) becomes Sleep(1)",
+        },
+        PatchSite {
+            at: At::Va(SIM_EXIT),
+            original: &SIM_EXIT_PUSH,
+            patched: &sim_exit_patched(),
+            note: "simulation thread exit: jump to the cave for timeEndPeriod(1)",
+        },
+        PatchSite {
+            at: At::Va(TIMER_CAVE),
+            original: &ZERO_TIMER_CAVE,
+            patched: &timer_cave(),
+            note: "timer cave: timeBeginPeriod(1)/timeEndPeriod(1) around the simulation thread",
+        },
+    ],
+    caves: &[PatchCave {
+        name: "timer",
+        at: At::Va(TIMER_CAVE),
+        len: TIMER_CAVE_LEN,
+    }],
+    results: &[],
+};
+
 /// The addresses and the two sets of a build that has them.
 fn build_of(build: [u8; 32]) -> Option<(&'static Build, &'static PatchSet, &'static PatchSet)> {
     if build == SSE1_CLEAN {
@@ -401,8 +500,9 @@ pub fn keys_set(build: [u8; 32]) -> Option<&'static PatchSet> {
 }
 
 /// Every set, for docs and the real-game test.
-pub const ALL: [&PatchSet; 9] = [
+pub const ALL: [&PatchSet; 10] = [
     &PACER,
+    &TIMER,
     &ASPECT_21_SSE1,
     &ASPECT_32_SSE1,
     &ASPECT_21_MAIN,
@@ -617,6 +717,59 @@ mod tests {
     }
 
     #[test]
+    fn the_timer_set_gives_the_simulation_thread_a_1_ms_timer() {
+        // Answers Quiver/issue #6 (Windows stutter): the simulation thread
+        // (0x5951B0) polls Sleep(4) for its 16 ms beat; on Windows 10 2004+
+        // without the game's own timeBeginPeriod that sleep lasts 15.6 ms.
+        assert_eq!(TIMER.name, "timer");
+        assert_eq!(TIMER.editions, &[SSE1_CLEAN]);
+        let site = |va: u32| {
+            TIMER
+                .sites
+                .iter()
+                .find(|s| s.at == At::Va(va))
+                .unwrap_or_else(|| panic!("no site at {va:#x}"))
+        };
+        // Thread entry: the prologue jumps to the cave, which calls
+        // timeBeginPeriod(1), replays the prologue and comes back.
+        let entry = site(0x0059_51B0);
+        assert_eq!(entry.original, &[0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF8]);
+        assert_eq!(entry.patched[0], 0xE9);
+        assert_eq!(entry.patched[5], 0x90);
+        assert_eq!(target(entry.patched, 0x0059_51B0), TIMER_CAVE);
+        let cave = site(TIMER_CAVE).patched;
+        assert_eq!(cave.len(), TIMER_CAVE_LEN);
+        assert_eq!(
+            &cave[..8],
+            &[0x6A, 0x01, 0xFF, 0x15, 0xE4, 0x62, 0x68, 0x00]
+        );
+        assert_eq!(&cave[8..14], &[0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF8]);
+        assert_eq!(cave[14], 0xE9);
+        assert_eq!(target(&cave[14..], TIMER_CAVE + 14), 0x0059_51B6);
+        // The wait: Sleep(4) becomes Sleep(1).
+        let wait = site(0x0059_52D7);
+        assert_eq!(
+            (wait.original, wait.patched),
+            (&[0x6A, 0x04][..], &[0x6A, 0x01][..])
+        );
+        // Thread exit: timeEndPeriod(1), then the original push and back.
+        let exit = site(0x0059_53CD);
+        assert_eq!(exit.original, &[0x68, 0xCC, 0xBD, 0x6C, 0x00]);
+        let end = target(exit.patched, 0x0059_53CD);
+        let at = (end - TIMER_CAVE) as usize;
+        assert_eq!(
+            &cave[at..at + 8],
+            &[0x6A, 0x01, 0xFF, 0x15, 0xDC, 0x62, 0x68, 0x00]
+        );
+        assert_eq!(&cave[at + 8..at + 13], &[0x68, 0xCC, 0xBD, 0x6C, 0x00]);
+        assert_eq!(target(&cave[at + 13..], end + 13), 0x0059_53D2);
+        // Between the pacer's cave and the window cave.
+        assert!(TIMER_CAVE >= 0x0068_5110);
+        assert!(TIMER_CAVE + TIMER_CAVE_LEN as u32 <= SSE1.window_cave);
+        assert!(ALL.contains(&&TIMER));
+    }
+
+    #[test]
     fn the_site_table_describes_itself() {
         let rows = patch::describe(&ASPECT_21_SSE1, None).unwrap();
         let table = patch::to_markdown(&rows);
@@ -639,6 +792,7 @@ mod tests {
             "SRR_GAME_DIR",
             &[
                 &PACER,
+                &TIMER,
                 &ASPECT_21_SSE1,
                 &BORDERLESS_SSE1,
                 &KEYS_SSE1,

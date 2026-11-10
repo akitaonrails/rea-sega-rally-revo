@@ -139,6 +139,7 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
         let mut sets: Vec<&'static PatchSet> = Vec::new();
         if name == SSE1_EXE && pacer && !edition.pacer_applied {
             sets.push(&patches::PACER);
+            sets.push(&patches::TIMER);
         }
         if let Some(set) = patches::aspect_set(edition.sha256, aspect) {
             sets.push(set);
@@ -304,7 +305,8 @@ mod tests {
     fn stutter_fix_on_runs_the_patched_sse1_build() {
         let plan = plan(&file("stutter_fix = on\n"), &RIP, &linux());
         assert_eq!(plan.launch, SSE1_EXE);
-        assert_eq!(sets(&plan, SSE1_EXE), ["pacer"]);
+        // The stutter fix brings the simulation thread's 1 ms timer.
+        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer"]);
         assert_eq!(sets(&plan, MAIN_EXE), Vec::<&str>::new());
         assert!(plan.notes.is_empty());
     }
@@ -348,7 +350,7 @@ mod tests {
         let plan = plan(&file("resolution = 3440x1440\n"), &RIP, &linux());
         assert_eq!(plan.graphics.resolution, Some((3440, 1440)));
         assert_eq!(plan.aspect, Aspect::Ultra21);
-        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "aspect 21:9"]);
+        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer", "aspect 21:9"]);
         assert_eq!(sets(&plan, MAIN_EXE), ["aspect 21:9"]);
         assert_eq!(plan.command[1], "/desktop=SegaRally,3440x1440");
         let plan = super::plan(&file("resolution = 5120x1440\n"), &RIP, &linux());
@@ -602,7 +604,7 @@ mod tests {
         let plan = plan(&settings, &RIP, &linux());
         assert_eq!(plan.command[1], "/desktop=SegaRally,3840x2160");
         assert_eq!(plan.resolution, (1280, 720));
-        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "borderless"]);
+        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer", "borderless"]);
         // Native Windows: no mode needed, so no warning about one.
         let mut env = windows();
         env.mode_supported = false;
@@ -618,13 +620,13 @@ mod tests {
         // Fullscreen (the default) keeps the desktop at the game's size.
         let plan = super::plan(&file("resolution = 1280x720\n"), &RIP, &linux());
         assert_eq!(plan.command[1], "/desktop=SegaRally,1280x720");
-        assert_eq!(sets(&plan, SSE1_EXE), ["pacer"]);
+        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer"]);
     }
 
     #[test]
     fn keys_patch_both_builds_and_only_when_moved() {
         let plan = plan(&file("keys = brake=down\n"), &RIP, &linux());
-        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "keys"]);
+        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer", "keys"]);
         assert_eq!(sets(&plan, MAIN_EXE), ["keys"]);
         assert_eq!(plan.key_table.unwrap()[0x2C], 0xD0);
         // The manual's keys said out loud: no patch.

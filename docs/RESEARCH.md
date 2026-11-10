@@ -147,6 +147,46 @@ A second patch, [Martijnsx/Sega-Rally-Revo-Frame-Pacing-Fix](https://github.com/
 different exe build (3,700,786 bytes, SHA-256 `246b4a63…12db39`) and is
 not applicable to ours; not shipped.
 
+## Windows stutter: the simulation thread's timer (Quiver, issue #6, 2026-11-09)
+
+A Windows 10 player (v0.4.2, stutter fix applied: `patches pacer
+(cb9a5a34…)` in his `launcher.log`, 1080p, vsync) reported "noticeable
+stutter … when you let the car roll on its own". Community fixes first:
+PCGamingWiki, stuken's README, Martijnsx's patch and the Steam threads
+(app 4790) describe the 62.5-fps/race-clock bug the stutter fix already
+covers; none mentions the timer below. RTSS limits, G-Sync and NVIDIA
+vsync were reported not to help ("an in-game code issue").
+
+What the game does (clean `SEGA Rally_SSE1.exe`):
+
+- The thread the pacer fix calls "the pacer" (`0x5951B0`, spawned by
+  `0x595660`) is the game's **Simulation Thread**: it runs the tasks
+  registered in list `0x728AAC`, named in the exe "Clock" (`0x5CF6D0`,
+  samples the master clock into `0x950930`), "Keyframe" (`0x5D31F0`, the
+  physics/AI keyframes due by the race clock, `0x594CB0`) and "Network";
+  the render thread's list is `0x7285D4` ("Render AI", "Event Markers",
+  …). It waits for each 16 ms beat by polling `Sleep(4)` (`0x5952D7`).
+- The game never asks for a fine system timer while it plays. Its only
+  `timeBeginPeriod(1)` (`0x46DFCC`) belongs to DirectShow video playback
+  and is balanced by `timeEndPeriod` when the video stops; a relay trace of
+  a title → attract race → quit session shows **zero** calls.
+- Since Windows 10 version 2004, `timeBeginPeriod` is per process (another
+  program's 1 ms request no longer speeds up this game's sleeps), and the
+  default timer tick is 15.625 ms. So on current Windows each `Sleep(4)`
+  lasts a full tick: the simulation beat runs on a 15.6 ms grid and, as
+  the 16 ms target drifts, takes **two** ticks (31 ms) about once every
+  0.65 s. The renderer then draws frames whose newest keyframe is more
+  than a full step old — a hitch roughly every second. Wine's timer is
+  always fine, so Linux never showed it (and our earlier measurements,
+  all under Wine, could not).
+
+The fix (`patches::TIMER`, the "timer" set, applied with the stutter
+fix): the simulation thread calls `timeBeginPeriod(1)` when it starts
+and `timeEndPeriod(1)` when it ends (hooks at its prologue `0x5951B0`
+and its exit `0x5953CD`, a 38-byte cave at `0x685140`, both WINMM
+imports already in the exe), and polls `Sleep(1)` instead of `Sleep(4)`.
+Measured in `docs/RUNTIME_NOTES.md` (2026-11-09).
+
 ## Aspect ratio
 
 - The game's renderer carries aspect tables in `.rdata`: two layouts
@@ -405,7 +445,7 @@ Windows Update never installs them.
 
 | Spot | Status for this game |
 | --- | --- |
-| Timers / frame pacing on fast CPUs | the two stacked stutter bugs above; stutter fix + DXVK limit |
+| Timers / frame pacing on fast CPUs | the two stacked stutter bugs above; stutter fix + DXVK limit; on Windows the simulation thread's 15.6 ms sleeps (the timer set) |
 | Multi-core affinity | no problem seen on a 16-core 7950X3D |
 | DirectSound3D / EAX | not analysed; sound worked under Wine in the recorded race; native Windows not tried |
 | CD audio | none (music is on disk) |
