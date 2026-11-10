@@ -14,6 +14,11 @@ rea-launcher = { git = "https://github.com/akitaonrails/rea-launcher-sdk", tag =
 rea-launcher-win32 = { git = "https://github.com/akitaonrails/rea-launcher-sdk", tag = "v0.6.0" }
 rea-launcher-ui = { git = "https://github.com/akitaonrails/rea-launcher-sdk", tag = "v0.6.0" }
 rea-launcher-build = { git = "https://github.com/akitaonrails/rea-launcher-sdk", tag = "v0.6.0" }
+# The close hook DLL, shipped next to SRRLauncher.exe (built with
+# `cargo build -p rea-launcher-close-hook`): its REA_REGISTRY redirect gives
+# the game its key from HKCU. The rlib adds the DLL to the runtime exes'
+# import table and checks the redirect rule with the DLL's own parser.
+rea-launcher-close-hook = { git = "https://github.com/akitaonrails/rea-launcher-sdk", tag = "v0.6.0" }
 
 [profile.release]
 panic = "abort"

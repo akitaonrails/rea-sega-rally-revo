@@ -36,13 +36,12 @@ mod app {
     use rea_launcher::{cfg, download, fsx, paths};
     use rea_launcher_win32::gpu::Glx;
     use rea_launcher_win32::instance::Window;
-    use rea_launcher_win32::reg::Key;
     use rea_launcher_win32::report::{self, Mode};
     use rea_launcher_win32::{disk, display as screen, gpu, http, process, wine, xinput};
     use srr_launcher::config::{self, Settings};
     use srr_launcher::edition::{self, GameEditions};
     use srr_launcher::plan::{self, Env};
-    use srr_launcher::{directx, gamecfg, instance, patches, runtime};
+    use srr_launcher::{directx, gamecfg, instance, patches, registry, runtime};
 
     use crate::ui;
 
@@ -165,22 +164,29 @@ mod app {
         Ok(())
     }
 
-    /// Writes the game's install values under `HKLM\SOFTWARE\Sega\SEGA
-    /// Rally` (its 32-bit view), or its HKCU VirtualStore twin when native
-    /// Windows refuses HKLM without elevation; 32-bit games read either.
-    // Deprecated in SDK v0.6.0; replaced in the next commit (HKCU and
-    // REA_REGISTRY).
-    #[allow(deprecated)]
-    fn seed_game_registry(values: &[gamecfg::RegValue]) -> Result<&'static str, String> {
-        let (key, place) = Key::machine_or_virtual_store(r"SOFTWARE\Sega\SEGA Rally")?;
-        for value in values {
-            if value.if_missing {
-                key.set_string_if_missing(value.name, &value.value)?;
-            } else {
-                key.set_string(value.name, &value.value)?;
-            }
+    /// The close hook DLL next to the launcher (the zip, the AppImage).
+    fn hook_dll() -> Option<PathBuf> {
+        launcher_dir()
+            .map(|dir| dir.join(registry::HOOK_DLL))
+            .filter(|path| path.is_file())
+    }
+
+    /// Puts the close hook DLL next to the runtime exes, which import it:
+    /// it gives the game its registry key from HKCU.
+    fn install_hook_dll(runtime: &Path) -> Result<(), String> {
+        let source = hook_dll().ok_or_else(|| {
+            format!(
+                "{} is missing. Keep it next to SRRLauncher.exe (it comes in the same zip): \
+                 the game reads its language through it.",
+                registry::HOOK_DLL
+            )
+        })?;
+        let target = runtime.join(registry::HOOK_DLL);
+        if fs::read(&source).ok() != fs::read(&target).ok() {
+            fsx::install_copy(&source, &target)
+                .map_err(|error| format!("cannot copy {}: {error}", registry::HOOK_DLL))?;
         }
-        Ok(place.describe())
+        Ok(())
     }
 
     /// `--download-directx`: the window's DirectX download without the
@@ -364,10 +370,28 @@ mod app {
         }
         log_line(&format!("game: {}", game.display()));
         if check_only {
+            // Ready only when the game will see its language: the DLL and
+            // its import, the redirect rule, and the HKCU values read back.
+            let known: Vec<(&str, &[u8])> = [
+                (edition::MAIN_EXE, editions.main_known(), &main_bytes),
+                (edition::SSE1_EXE, editions.sse1_known(), &sse1_bytes),
+            ]
+            .into_iter()
+            .filter_map(|(name, known, bytes)| Some((name, known.and(bytes.as_deref())?)))
+            .collect();
+            let mut problems = registry::hook_problems(hook_dll().is_some(), &known);
+            let values = registry::values(settings.language.as_deref(), &registry::earlier());
+            if let Err(text) = registry::write(&values) {
+                problems.push(text);
+            }
+            if !problems.is_empty() {
+                return Err(format!("Not ready to play.\n\n{}", problems.join("\n\n")));
+            }
             command(&format!(
-                "Ready to play.\n\nGame folder: {}\n{}",
+                "Ready to play.\n\nGame folder: {}\n{}\nThe game's language: HKCU\\{}",
                 game.display(),
-                editions.names().join("\n")
+                editions.names().join("\n"),
+                registry::USER_KEY
             ));
             return Ok(0);
         }
@@ -456,6 +480,7 @@ mod app {
             dll_overrides: std::env::var("WINEDLLOVERRIDES").ok(),
             directx: directx_files.dlls.clone(),
             runtime: runtime_dir.display().to_string(),
+            earlier: registry::earlier(),
         };
         let mut plan = plan::plan(&settings, &editions, &env);
         if !wine && !screen::mode_supported(plan.resolution.0, plan.resolution.1) {
@@ -483,14 +508,18 @@ mod app {
             .ok_or("a game executable disappeared")?;
             let patched = patches::apply(pristine, sets, plan.key_table.as_ref())
                 .map_err(|error| format!("{name}: {} refused: {error}", patches::names(sets)))?;
+            // Last, so the patch sets see the game's own layout.
+            let patched =
+                registry::with_hook(&patched).map_err(|error| format!("{name}: {error}"))?;
             let target = runtime_dir.join(name);
             if fs::read(&target).ok().as_deref() != Some(&patched[..]) {
                 fsx::install(&target, &patched)
                     .map_err(|error| format!("cannot write the private copy of {name}: {error}"))?;
             }
             log_line(&format!(
-                "{name}: patches {} (SHA-256 {})",
+                "{name}: patches {}, imports {} (SHA-256 {})",
                 patches::names(sets),
+                registry::HOOK_DLL,
                 identify::hex(&identify::sha256(&patched))
             ));
         }
@@ -568,13 +597,18 @@ mod app {
             )),
         }
 
-        match seed_game_registry(&plan.registry) {
-            Ok(place) => log_line(&format!(
-                "registry: installdir, sku and language ({}) written ({place})",
-                settings.effective_language()
-            )),
-            Err(error) => log_line(&format!("warning: {error}")),
-        }
+        install_hook_dll(&runtime_dir)?;
+        registry::write(&plan.registry)?;
+        log_line(&format!(
+            "registry: HKCU\\{} {}, read back; the game reads it there ({})",
+            registry::USER_KEY,
+            registry::describe(&plan.registry),
+            plan.game_env
+                .iter()
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
 
         if plan.install_dxvk {
             configure_dxvk(&runtime_dir, true)?;
@@ -604,6 +638,9 @@ mod app {
 
         let mut command = Command::new(&plan.command[0]);
         command.args(&plan.command[1..]);
+        for (name, value) in &plan.game_env {
+            command.env(name, value);
+        }
         if let Some(overrides) = &plan.dll_overrides {
             log_line(&format!("wine: DLL overrides {overrides}"));
             command.env("WINEDLLOVERRIDES", overrides);

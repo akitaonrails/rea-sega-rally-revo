@@ -1,6 +1,7 @@
 # Everything SRRLauncher-<version>/ (the zip) may hold; anything else fails
 # sdk/packaging/smoke-package.sh. Never game files.
 SRRLauncher.exe
+rea_close_hook.dll
 README.md
 THIRD_PARTY.md
 LICENSE-MIT

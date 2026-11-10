@@ -91,6 +91,14 @@ as `distrobox enter gaming -- sh -c 'cd /absolute/path && …'`.
   the keys set (`keys`; its 256-byte table is written from the option),
   both for the clean SSE1 and the NoDVD build only. Everything else is
   configuration the game reads.
+- The game's registry key: both exes read `language` and `sku` from
+  `HKLM\SOFTWARE\SEGA\SEGA Rally` (nothing reads `installdir`). The
+  launcher writes them only to `HKCU\Software\Sega\SEGA Rally`
+  (`registry::write`, read back; Play and `--check` stop on a mismatch),
+  and every runtime exe imports the SDK's `rea_close_hook.dll` (added last,
+  after the patch sets) whose `REA_REGISTRY` rule redirects the game there.
+  Never write HKLM or the VirtualStore; old values are only read, once, to
+  carry them over.
 - `config.ini` is seeded complete only when missing; afterwards only the
   keys of options set in `launcher.cfg` are written (`ini::Owned`). Never
   rewrite `[Audio]`. In `[GameController]` the only thing the launcher

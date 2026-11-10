@@ -33,11 +33,20 @@ described below match these exact bytes.
 From the `distrobox-gaming` install history (2026-05-01 through 2026-08-21):
 
 1. **Registry gate.** The game reads
-   `HKLM\SOFTWARE\WOW6432Node\Sega\SEGA Rally` (`installdir`, `sku`,
-   `language`) and refuses to behave without it. The rip ships a
-   `SEGA Rally.reg` pointing at `C:\Sega Rally\`. *Wired by:* the launcher
-   seeds these values, pointing `installdir` at its private runtime copy
-   (HKCU VirtualStore fallback on non-elevated native Windows).
+   `HKLM\SOFTWARE\WOW6432Node\Sega\SEGA Rally` and refuses to behave
+   without it (with no key it ends by itself right after the title
+   screen, 2026-11-10). Both exes open it with `RegOpenKeyExA` (`KEY_READ`)
+   and read only `language` (0x57C980) and `sku` (0x666170); the rip's
+   `SEGA Rally.reg` also sets `installdir`, which nothing reads. Both exes
+   carry an `asInvoker` manifest, so UAC registry virtualization is off for
+   them: the VirtualStore copy an unelevated launcher's `HKLM` write lands
+   in never reaches the game (same bug class as
+   akitaonrails/rea-colin-mcrae#6). *Wired by (v0.6.0):* the launcher
+   writes `language` and `sku` to `HKCU\Software\Sega\SEGA Rally`, reads
+   them back, and the SDK's close hook DLL, imported by the runtime copies,
+   redirects the game's open of its `HKLM` key there (`REA_REGISTRY`).
+   Before v0.6.0 it wrote `HKLM` (VirtualStore fallback), so on native
+   Windows without admin rights the Language option was ignored.
 2. **The .NET settings launcher is unreliable under Wine**, so
    `Documents\SEGA Rally\Saved Games\config.ini` must exist before launch.
    *Wired by:* the launcher writes config.ini itself (the `[Graphics]`
@@ -495,7 +504,7 @@ Windows Update never installs them.
 | Headless gamescope 4K | verified: title, attract demo, quality presets |
 | Steam Deck Game Mode (1280×800, controller, suspend/resume) | **not verified** |
 | Steam Proton running `SRRLauncher.exe` directly | **not verified** (frame limit through Proton's DXVK) |
-| Native Windows 10/11 | **not verified** (DirectX Download path, VirtualStore registry) |
+| Native Windows 10/11 | **not verified** (DirectX Download path, the HKCU registry redirect, unelevated) |
 | Multi-monitor | the isolated Wine desktop exists for it (verified 2026-08-21 in distrobox-gaming); native Windows not tried |
 | HiDPI / 4K | verified on Linux; Wine DPI 144/192 window fit unit-tested only |
 | Ultra-wide 21:9 / 32:9 | **not verified** |

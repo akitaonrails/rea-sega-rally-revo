@@ -22,14 +22,16 @@ pub const DXVK_MARKER: &str = ".srr-dxvk";
 pub const CONFIG_OWNED: &str = ".srr-config-owned";
 
 /// Files the launcher owns in the runtime copy and a sync must never
-/// overwrite: the `dxvk.conf` it writes and its own bookkeeping, always;
+/// overwrite: the `dxvk.conf` it writes, the close hook DLL the runtime
+/// exes import and its own bookkeeping, always;
 /// `d3d9.dll` only while the launcher manages DXVK there (`dxvk_managed`:
 /// `--linux`, or its marker is present). On native Windows a player's own
 /// `d3d9.dll` (ReShade, dgVoodoo, DXVK for Windows) is copied like any
 /// other game file.
 pub fn is_owned(rel: &str, dxvk_managed: bool) -> bool {
-    const OWNED: [&str; 5] = [
+    const OWNED: [&str; 6] = [
         "dxvk.conf",
+        crate::registry::HOOK_DLL,
         MANIFEST,
         DXVK_MARKER,
         CONFIG_OWNED,
@@ -200,7 +202,7 @@ mod tests {
         assert_eq!(windows.copy, ["SEGA Rally.exe", "d3d9.dll"]);
         for managed in [false, true] {
             assert!(is_owned(MANIFEST, managed) && is_owned(DXVK_MARKER, managed));
-            assert!(is_owned("dxvk.conf", managed));
+            assert!(is_owned("dxvk.conf", managed) && is_owned("rea_close_hook.dll", managed));
         }
         assert!(
             !is_owned("Data/d3d9.dll", true),

@@ -49,6 +49,10 @@ Env {
     ),
     directx: [],
     runtime: "C:\\users\\steamuser\\AppData\\Local\\SRRLauncher\\SegaRally",
+    earlier: Earlier {
+        language: None,
+        sku: None,
+    },
 }
 
 ## launch
@@ -71,10 +75,12 @@ SEGA Rally.exe: aspect 32:9
   0x2F4BF4: 39 8E 63 40  (aspect table 1: 16:9 slot)
   0x2F7D68: 39 8E 63 40  (aspect table 2: 16:9 slot)
 
-## registry (HKLM\SOFTWARE\Sega\SEGA Rally, 32-bit view)
-installdir = "C:\\users\\steamuser\\AppData\\Local\\SRRLauncher\\SegaRally\\"
+## registry (HKCU\Software\Sega\SEGA Rally)
 sku = "Europe" (only when missing)
 language = "English" (only when missing)
+
+## game environment
+REA_REGISTRY=HKLM\SOFTWARE\Sega\SEGA Rally -> HKCU\Software\Sega\SEGA Rally
 
 ## dxvk.conf
 d3d9.maxFrameRate = 60

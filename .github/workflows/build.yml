@@ -25,6 +25,9 @@ jobs:
       apt-packages: gcc-mingw-w64-i686 lld zip unzip
       clippy-args: ""
       wine-tests: true
+      # The SDK's close hook DLL (a dependency, not a workspace member),
+      # packaged next to SRRLauncher.exe by packaging/package.sh.
+      extra-build: cargo build --release --locked --target "$RUST_TARGET" -p rea-launcher-close-hook
       shell-tests: linux/tests/*.sh packaging/tests/*.sh
       package-command: |
         sh packaging/package.sh "$REA_VERSION_NAME" dist "$REA_RELEASE_DIR"
@@ -32,6 +35,7 @@ jobs:
         appimage="$PWD/dist/SRRLauncher-$REA_VERSION_NAME-x86_64.AppImage"
         (cd "$RUNNER_TEMP" && "$appimage" --appimage-extract >/dev/null &&
           test -f squashfs-root/usr/lib/srr/linux/d3d9.dll &&
+          test -f squashfs-root/usr/lib/srr/rea_close_hook.dll &&
           test -f squashfs-root/usr/lib/srr/rea-play.sh && rm -rf squashfs-root)
         # The bundled Wine must not die at startup or reserve a huge address
         # space (Wine 11.20 reserved ~64 GiB and crashed on 16 GB machines).

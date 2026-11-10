@@ -74,7 +74,8 @@ Download from the [latest release](https://github.com/akitaonrails/rea-sega-rall
 ### Windows
 
 1. Unzip `SRRLauncher-<version>.zip` anywhere outside the game folder.
-2. Run `SRRLauncher.exe`.
+   Keep `rea_close_hook.dll` next to `SRRLauncher.exe`.
+2. Run `SRRLauncher.exe`. It needs no administrator rights.
 
 The launcher is not signed, so the first start from a downloaded zip may
 show "Windows protected your PC": click *More info*, then *Run anyway*.
@@ -311,7 +312,7 @@ Registry entries the launcher writes:
 
 | Entry | Where | Why |
 | --- | --- | --- |
-| `HKLM\SOFTWARE\WOW6432Node\Sega\SEGA Rally` (or its VirtualStore copy under HKCU) | Windows, and the Wine prefix | the game's install values, the way its installer writes them |
+| `HKCU\Software\Sega\SEGA Rally` (`language`, `sku`) | Windows, and the Wine prefix | the game's language. The game looks for it under `HKLM`; `rea_close_hook.dll`, which the private copies of the game's exes load, sends it here instead, so no administrator rights are needed. Since v0.6.0: on the first start, a language an earlier release left in `HKLM` or its VirtualStore copy is carried over; the old key is only read |
 | `HKCU\Software\Microsoft\DirectX\UserGpuPreferences`, a value named after the private copy's game exe (`…\SRRLauncher\SegaRally\SEGA Rally_SSE1.exe` or `SEGA Rally.exe`) = `GpuPreference=2;` | Windows only, only when you haven't chosen a GPU for it | the game uses the high-performance GPU |
 | `HKLM\System\CurrentControlSet\Services\winebus` (`DisableHidraw`, `DisableInput`, `Enable SDL`, `Map Controllers`, each only when missing) | the Wine prefix | pads reach the game once, through Wine's SDL bridge |
 | `HKCU\Software\Wine\X11 Driver` `UseEGL = N` (only when missing) | the Wine prefix | the settings window draws through OpenGL GLX |
@@ -333,6 +334,13 @@ Registry entries the launcher writes:
   discrete GPU.
 - **The pad does nothing in the game**: switch the pad to X-input mode,
   then bind it in the game's Controls menu.
+- **The game shows English though you chose another language, or the
+  launcher says "Not ready to play" about `rea_close_hook.dll` or the
+  game's language**: keep `rea_close_hook.dll` next to `SRRLauncher.exe`
+  (it is in the zip; some antivirus programs move new DLLs away). The
+  language lives in `HKCU\Software\Sega\SEGA Rally`, your own part of the
+  registry, so no administrator rights are needed; if Windows refuses even
+  that, the message names the value that failed.
 - **"Sega Rally Revo is already running from this launcher"**: the game
   from an earlier start is still running. Quit it first.
 - **Anything else**: run `SRRLauncher --check`, then open an issue with the
@@ -362,9 +370,10 @@ Registry entries the launcher writes:
 2. Delete the launcher's folder (or the AppImage).
 3. Windows: delete `%LOCALAPPDATA%\SRRLauncher` (settings, log, the private
    copy of about 4.2 GB, the DirectX 9 files). The registry key
+   `HKCU\Software\Sega\SEGA Rally` can go too; so can
    `HKLM\SOFTWARE\WOW6432Node\Sega\SEGA Rally` (or its VirtualStore copy
-   under HKCU) can go too, unless you still play the game without the
-   launcher. In `HKCU\Software\Microsoft\DirectX\UserGpuPreferences`,
+   under HKCU), which releases before v0.6.0 wrote, unless you still play
+   the game without the launcher. In `HKCU\Software\Microsoft\DirectX\UserGpuPreferences`,
    delete the value whose name ends in `SRRLauncher\SegaRally\SEGA
    Rally_SSE1.exe` or `SEGA Rally.exe` (Settings → System → Display →
    Graphics lists it too).

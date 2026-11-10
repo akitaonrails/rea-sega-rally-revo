@@ -57,6 +57,10 @@ Env {
     dll_overrides: None,
     directx: [],
     runtime: "C:\\Users\\José\\AppData\\Local\\SRRLauncher\\SegaRally",
+    earlier: Earlier {
+        language: None,
+        sku: None,
+    },
 }
 
 ## launch
@@ -95,10 +99,12 @@ SEGA Rally_SSE1.exe: pacer + timer + video
   VA 0x4DC79D: E9 E2 89 1A 00 CC CC CC CC CC  (video Run: when IMediaControl::Run fails the stream is marked ended)
   VA 0x685170: 8B 87 30 01 00 00 85 C0 0F 84 C4 73 E5 FF E9 CD 73 E5 FF CC 85 C0 7D 1E 8B 4C 24 04 69 C9 3C 01 00 00 8B 89 9C F6 AB 00 85 C9 74 07 C7 41 70 01 00 00 00 31 C0 C3 B8 01 00 00 00 C3  (video cave: the two checks)
 
-## registry (HKLM\SOFTWARE\Sega\SEGA Rally, 32-bit view)
-installdir = "C:\\Users\\José\\AppData\\Local\\SRRLauncher\\SegaRally\\"
+## registry (HKCU\Software\Sega\SEGA Rally)
 sku = "Europe"
 language = "English"
+
+## game environment
+REA_REGISTRY=HKLM\SOFTWARE\Sega\SEGA Rally -> HKCU\Software\Sega\SEGA Rally
 
 ## dxvk.conf
 (not written)

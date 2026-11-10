@@ -325,46 +325,6 @@ pub fn wine_overrides(existing: Option<&str>, dxvk: bool, native: &[String]) -> 
     ))
 }
 
-/// One registry value under `HKLM\SOFTWARE\Sega\SEGA Rally`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RegValue {
-    pub name: &'static str,
-    pub value: String,
-    /// Written only when the value is not there yet (a default the
-    /// player's own value wins over).
-    pub if_missing: bool,
-}
-
-/// Registry values the game reads before it will start. `installdir` is
-/// the private runtime copy, with the trailing backslash of the original
-/// `SEGA Rally.reg`. `language` is written when the option is set; unset,
-/// English is only a default for a missing value. `sku` follows the
-/// language: the Polish menus need `polish` (the full rip's readme; with
-/// `Europe` the game shows English), every other language `Europe`.
-pub fn registry_values(runtime_windows_path: &str, language: Option<&str>) -> Vec<RegValue> {
-    let sku = match language {
-        Some(language) if language.eq_ignore_ascii_case("Polish") => "polish",
-        _ => "Europe",
-    };
-    vec![
-        RegValue {
-            name: "installdir",
-            value: format!("{runtime_windows_path}\\"),
-            if_missing: false,
-        },
-        RegValue {
-            name: "sku",
-            value: sku.to_string(),
-            if_missing: language.is_none(),
-        },
-        RegValue {
-            name: "language",
-            value: language.unwrap_or("English").to_string(),
-            if_missing: language.is_none(),
-        },
-    ]
-}
-
 /// The game's save file, in [`DocumentsPaths::saved_games`].
 pub const SAVE_FILE: &str = "SEGA Rally.dat";
 /// The game's local leaderboard, in [`DocumentsPaths::rank_table`].
@@ -903,68 +863,6 @@ mod tests {
         std::fs::remove_file(&ranks).unwrap();
         assert_eq!(remove_old_seeds(&documents), 0);
         std::fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn polish_menus_need_the_polish_sku() {
-        // The full rip's readme: Polish shows only with sku "polish";
-        // with "Europe" the game falls back to English (seen in the game,
-        // 2026-11-02).
-        let polish = registry_values(r"C:\x", Some("Polish"));
-        assert_eq!(
-            polish[1],
-            RegValue {
-                name: "sku",
-                value: "polish".into(),
-                if_missing: false
-            }
-        );
-        // Another language set: back to the European build.
-        let german = registry_values(r"C:\x", Some("German"));
-        assert_eq!(
-            (german[1].value.as_str(), german[1].if_missing),
-            ("Europe", false)
-        );
-        // Unset: the player's own sku (and language) stay.
-        let unset = registry_values(r"C:\x", None);
-        assert_eq!(
-            (unset[1].value.as_str(), unset[1].if_missing),
-            ("Europe", true)
-        );
-    }
-
-    #[test]
-    fn registry_values_carry_the_runtime_path_and_language() {
-        let values = registry_values(
-            r"C:\users\me\AppData\Local\SRRLauncher\SegaRally",
-            Some("French"),
-        );
-        assert_eq!(values[0].name, "installdir");
-        assert_eq!(
-            values[0].value,
-            r"C:\users\me\AppData\Local\SRRLauncher\SegaRally\"
-        );
-        assert_eq!(
-            (values[1].name, values[1].value.as_str()),
-            ("sku", "Europe")
-        );
-        assert_eq!(
-            values[2],
-            RegValue {
-                name: "language",
-                value: "French".into(),
-                if_missing: false
-            }
-        );
-        let unset = registry_values(r"C:\x", None);
-        assert_eq!(
-            unset[2],
-            RegValue {
-                name: "language",
-                value: "English".into(),
-                if_missing: true
-            }
-        );
     }
 
     #[test]

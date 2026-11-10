@@ -14,11 +14,13 @@ use std::fmt::Write;
 
 use rea_launcher::ini::Owned;
 use rea_launcher::patch;
+use rea_launcher_win32::reg::When;
 use srr_launcher::config::{self, Settings};
 use srr_launcher::edition::{GameEditions, MAIN_NODVD_BUILD, SSE1_CLEAN_BUILD};
 use srr_launcher::form::{Form, Look};
 use srr_launcher::gamecfg;
 use srr_launcher::plan::{self, Env, Plan};
+use srr_launcher::registry::Earlier;
 
 const RIP: GameEditions = GameEditions {
     main: Some(Ok(&MAIN_NODVD_BUILD)),
@@ -128,24 +130,23 @@ fn render(
             }
         }
     }
-    writeln!(
-        w,
-        "\n## registry (HKLM\\SOFTWARE\\Sega\\SEGA Rally, 32-bit view)"
-    )
-    .unwrap();
+    writeln!(w, "\n## registry (HKCU\\Software\\Sega\\SEGA Rally)").unwrap();
     for value in &plan.registry {
         writeln!(
             w,
-            "{} = {:?}{}",
+            "{} = {}{}",
             value.name,
-            value.value,
-            if value.if_missing {
-                " (only when missing)"
-            } else {
-                ""
+            value.data,
+            match value.when {
+                When::Always => "",
+                When::IfMissing => " (only when missing)",
             }
         )
         .unwrap();
+    }
+    writeln!(w, "\n## game environment").unwrap();
+    for (name, value) in &plan.game_env {
+        writeln!(w, "{name}={value}").unwrap();
     }
     writeln!(
         w,
@@ -299,12 +300,18 @@ fn combo_nothing_set_under_proton_keeps_the_players_config() {
         screen: Some((2560, 1440)),
         config_resolution: gamecfg::resolution_in(PLAYER_CONFIG.as_bytes()),
         runtime: RUNTIME.into(),
+        // An earlier release left Polish in the old HKLM key: carried over.
+        earlier: Earlier {
+            language: Some("Polish".into()),
+            sku: Some("polish".into()),
+        },
         ..Env::default()
     };
     snapshot(
         "combo-unset-proton",
         &render(
-            "Nothing set (command line only), Steam's Proton, existing config.ini",
+            "Nothing set (command line only), Steam's Proton, existing config.ini, \
+             Polish from an earlier release",
             &Settings::default(),
             &RIP,
             &env,

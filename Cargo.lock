@@ -1954,6 +1954,16 @@ version = "0.6.0"
 source = "git+https://github.com/akitaonrails/rea-launcher-sdk?tag=v0.6.0#acba13c1fa38113a05a3f9f928a655c7b60aa524"
 
 [[package]]
+name = "rea-launcher-close-hook"
+version = "0.6.0"
+source = "git+https://github.com/akitaonrails/rea-launcher-sdk?tag=v0.6.0#acba13c1fa38113a05a3f9f928a655c7b60aa524"
+dependencies = [
+ "rea-launcher",
+ "rea-launcher-build",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "rea-launcher-ui"
 version = "0.6.0"
 source = "git+https://github.com/akitaonrails/rea-launcher-sdk?tag=v0.6.0#acba13c1fa38113a05a3f9f928a655c7b60aa524"
@@ -2261,6 +2271,7 @@ dependencies = [
  "iced-x86",
  "rea-launcher",
  "rea-launcher-build",
+ "rea-launcher-close-hook",
  "rea-launcher-ui",
  "rea-launcher-win32",
 ]

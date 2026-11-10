@@ -14,6 +14,12 @@ Add a row before bundling anything new.
 | Rust standard library (pre-release) | MIT OR Apache-2.0 | rust-lang.org |
 | MinGW-w64 runtime | BSD-3-Clause and others | mingw-w64.org |
 
+## Bundled next to SRRLauncher.exe
+
+| Component | Licence | Source |
+| --- | --- | --- |
+| `rea_close_hook.dll` (rea-launcher-close-hook, from the SDK): the private copies of the game's exes import it, and it gives the game its registry key from `HKCU` (`REA_REGISTRY`) | MIT OR Apache-2.0 | github.com/akitaonrails/rea-launcher-sdk (built from the tag pinned in `Cargo.toml`); zip and AppImage |
+
 ## Bundled for Linux
 
 `rea-play.sh`, the SDK's play library (MIT OR Apache-2.0), ships beside

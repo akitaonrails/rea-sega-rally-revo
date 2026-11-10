@@ -10,8 +10,10 @@ use rea_launcher::patch::PatchSet;
 use crate::config::{Aspect, DisplayMode, Quality, Settings};
 use crate::display;
 use crate::edition::{GameEditions, MAIN_EXE, SSE1_EXE};
-use crate::gamecfg::{self, Graphics, RegValue};
+use crate::gamecfg::{self, Graphics};
 use crate::patches;
+use crate::registry::{self, Earlier};
+use rea_launcher_win32::reg::Value;
 
 /// What the launch depends on besides the settings and the game folder.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -34,6 +36,8 @@ pub struct Env {
     pub directx: Vec<String>,
     /// The private copy as Windows spells it.
     pub runtime: String,
+    /// The game's registry values from before (carried over into HKCU).
+    pub earlier: Earlier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +57,11 @@ pub struct Plan {
     /// The pad-vibration switch set in `launcher.cfg` (`None`: the
     /// game's own value stays).
     pub rumble: Option<bool>,
-    pub registry: Vec<RegValue>,
+    /// The values under `HKCU\Software\Sega\SEGA Rally`.
+    pub registry: Vec<Value>,
+    /// Variables for the game process: the close hook's registry
+    /// redirect.
+    pub game_env: Vec<(&'static str, String)>,
     /// `dxvk.conf` in the private copy (any DXVK reads it: ours or Proton's).
     pub dxvk_conf: Option<String>,
     /// Put the bundled DXVK `d3d9.dll` into the private copy.
@@ -188,7 +196,7 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
             if on { "on" } else { "off" }
         ));
     }
-    let registry = gamecfg::registry_values(&env.runtime, settings.language.as_deref());
+    let registry = registry::values(settings.language.as_deref(), &env.earlier);
     let dxvk = env.linux || env.wine;
     let dxvk_conf = dxvk.then(|| gamecfg::dxvk_conf(settings.effective_frame_limit().fps()));
     let native = crate::directx::override_names(&env.directx);
@@ -251,6 +259,7 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
         graphics,
         rumble: settings.rumble,
         registry,
+        game_env: registry::game_env(),
         dxvk_conf,
         install_dxvk: env.linux,
         dll_overrides,
@@ -428,23 +437,35 @@ mod tests {
     }
 
     #[test]
-    fn language_reaches_the_registry() {
+    fn language_reaches_the_games_key_through_the_redirect() {
+        use rea_launcher_win32::reg::{Data, When};
+        let language = |plan: &Plan| {
+            let value = plan.registry.iter().find(|v| v.name == "language").unwrap();
+            (value.data.clone(), value.when)
+        };
         let plan = plan(&file("language = polish\n"), &RIP, &windows());
-        let language = plan.registry.iter().find(|v| v.name == "language").unwrap();
         assert_eq!(
-            (language.value.as_str(), language.if_missing),
-            ("Polish", false)
+            language(&plan),
+            (Data::String("Polish".into()), When::Always)
         );
-        let plan = super::plan(&Settings::default(), &RIP, &windows());
-        let language = plan.registry.iter().find(|v| v.name == "language").unwrap();
+        // Unset: the player's earlier value fills a missing one.
+        let env = Env {
+            earlier: Earlier {
+                language: Some("Spanish".into()),
+                sku: None,
+            },
+            ..windows()
+        };
+        let plan = super::plan(&Settings::default(), &RIP, &env);
         assert_eq!(
-            (language.value.as_str(), language.if_missing),
-            ("English", true)
+            language(&plan),
+            (Data::String("Spanish".into()), When::IfMissing)
         );
-        assert_eq!(
-            plan.registry[0].value,
-            r"C:\Users\José\AppData\Local\SRRLauncher\SegaRally\"
-        );
+        // Windows and Wine alike: the game reads its HKLM key from HKCU.
+        for env in [windows(), linux()] {
+            let plan = super::plan(&Settings::default(), &RIP, &env);
+            assert_eq!(plan.game_env, registry::game_env());
+        }
     }
 
     #[test]
@@ -598,9 +619,11 @@ mod tests {
                     })
             }),
             ("language", &["--language", "german"], |p, _| {
-                p.registry
-                    .iter()
-                    .any(|v| v.name == "language" && v.value == "German" && !v.if_missing)
+                p.registry.iter().any(|v| {
+                    v.name == "language"
+                        && v.data == rea_launcher_win32::reg::Data::String("German".into())
+                        && v.when == rea_launcher_win32::reg::When::Always
+                })
             }),
         ];
         for option in rea_launcher::cfg::spec::active(crate::config::OPTIONS) {

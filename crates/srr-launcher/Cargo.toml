@@ -16,6 +16,8 @@ rea-launcher.workspace = true
 # (`report::Run`/`Audience`) and what a second start does
 # (`instance::SecondStart`); the Win32 calls themselves are cfg(windows).
 rea-launcher-win32.workspace = true
+# The registry redirect rule and the import that loads the DLL with the game.
+rea-launcher-close-hook.workspace = true
 # Takes the D3DX9 DLLs out of Microsoft's DirectX package (MIT).
 cab = "0.6"
 

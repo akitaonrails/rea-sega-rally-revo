@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Your language choice now works on Windows without administrator
+  rights.** The game reads its language from `HKLM`, which a launcher
+  without admin rights can't write; Windows put the launcher's value in
+  the VirtualStore instead, and this game never reads that. So the
+  Language option was ignored on Windows and the game stayed in English.
+  The launcher now keeps the game's settings in
+  `HKCU\Software\Sega\SEGA Rally`, checks that they were saved, and the
+  private copies of the game's exes load `rea_close_hook.dll` (new in the
+  zip and the AppImage, next to `SRRLauncher.exe`), which points the game
+  there. A language an earlier release saved is carried over on the
+  first start. `--check` now says "Not ready to play" when the DLL is
+  missing or the settings can't be saved. The unused `installdir` value is
+  no longer written. Same path under Linux.
 - Updated rea-launcher-sdk to v0.6.0.
 
 ## v0.5.1 - 2026-11-09

@@ -9,4 +9,5 @@ pub mod keys;
 pub mod pacer;
 pub mod patches;
 pub mod plan;
+pub mod registry;
 pub mod runtime;
