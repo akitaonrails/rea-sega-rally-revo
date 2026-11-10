@@ -13,7 +13,13 @@
   simulation thread runs and polls `Sleep(1)`: measured, the beat stays
   within 15.1–17.2 ms and no frame shows a keyframe more than 17 ms old
   (Windows timing emulated: 62 such frames a minute before, 0 after).
-  The launcher log reads `patches pacer + timer`.
+  The launcher log reads `patches pacer + timer + video`.
+- **No black screen until a button press at startup** (issue #5): the
+  launcher switches the two boot logo videos off, and the game's video
+  player then waited forever for frames that never came, until a button
+  skipped it. A video that cannot play now ends at once, so the title
+  screen comes up by itself. Clean `SEGA Rally_SSE1.exe` (the default
+  with the stutter fix); the NoDVD `SEGA Rally.exe` still needs one press.
 
 ## v0.5.0 - 2026-11-09
 

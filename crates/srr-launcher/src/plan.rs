@@ -141,6 +141,13 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
             sets.push(&patches::PACER);
             sets.push(&patches::TIMER);
         }
+        // The boot logo videos are switched off in the runtime; the launched
+        // exe must not wait for them (issue #5).
+        if name == launch
+            && let Some(set) = patches::video_set(edition.sha256)
+        {
+            sets.push(set);
+        }
         if let Some(set) = patches::aspect_set(edition.sha256, aspect) {
             sets.push(set);
         }
@@ -306,7 +313,7 @@ mod tests {
         let plan = plan(&file("stutter_fix = on\n"), &RIP, &linux());
         assert_eq!(plan.launch, SSE1_EXE);
         // The stutter fix brings the simulation thread's 1 ms timer.
-        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer"]);
+        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer", "video"]);
         assert_eq!(sets(&plan, MAIN_EXE), Vec::<&str>::new());
         assert!(plan.notes.is_empty());
     }
@@ -316,6 +323,22 @@ mod tests {
         let plan = plan(&file("stutter_fix = off\n"), &RIP, &linux());
         assert_eq!(plan.launch, MAIN_EXE);
         assert!(plan.patches.iter().all(|(_, sets)| sets.is_empty()));
+    }
+
+    #[test]
+    fn the_launched_clean_sse1_build_ends_boot_videos_that_cannot_play() {
+        // Issue #5: the stutter fix off, with only the clean SSE1 build, it
+        // is still the launched exe and still gets the video fix.
+        let sse1_only = GameEditions {
+            main: None,
+            sse1: Some(Ok(&SSE1_CLEAN_BUILD)),
+        };
+        let plan = plan(&file("stutter_fix = off\n"), &sse1_only, &windows());
+        assert_eq!(plan.launch, SSE1_EXE);
+        assert_eq!(sets(&plan, SSE1_EXE), ["video"]);
+        // Not launched: left alone.
+        let plan = super::plan(&file("stutter_fix = off\n"), &RIP, &windows());
+        assert_eq!(sets(&plan, SSE1_EXE), Vec::<&str>::new());
     }
 
     #[test]
@@ -350,7 +373,10 @@ mod tests {
         let plan = plan(&file("resolution = 3440x1440\n"), &RIP, &linux());
         assert_eq!(plan.graphics.resolution, Some((3440, 1440)));
         assert_eq!(plan.aspect, Aspect::Ultra21);
-        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer", "aspect 21:9"]);
+        assert_eq!(
+            sets(&plan, SSE1_EXE),
+            ["pacer", "timer", "video", "aspect 21:9"]
+        );
         assert_eq!(sets(&plan, MAIN_EXE), ["aspect 21:9"]);
         assert_eq!(plan.command[1], "/desktop=SegaRally,3440x1440");
         let plan = super::plan(&file("resolution = 5120x1440\n"), &RIP, &linux());
@@ -604,7 +630,10 @@ mod tests {
         let plan = plan(&settings, &RIP, &linux());
         assert_eq!(plan.command[1], "/desktop=SegaRally,3840x2160");
         assert_eq!(plan.resolution, (1280, 720));
-        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer", "borderless"]);
+        assert_eq!(
+            sets(&plan, SSE1_EXE),
+            ["pacer", "timer", "video", "borderless"]
+        );
         // Native Windows: no mode needed, so no warning about one.
         let mut env = windows();
         env.mode_supported = false;
@@ -620,13 +649,13 @@ mod tests {
         // Fullscreen (the default) keeps the desktop at the game's size.
         let plan = super::plan(&file("resolution = 1280x720\n"), &RIP, &linux());
         assert_eq!(plan.command[1], "/desktop=SegaRally,1280x720");
-        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer"]);
+        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer", "video"]);
     }
 
     #[test]
     fn keys_patch_both_builds_and_only_when_moved() {
         let plan = plan(&file("keys = brake=down\n"), &RIP, &linux());
-        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer", "keys"]);
+        assert_eq!(sets(&plan, SSE1_EXE), ["pacer", "timer", "video", "keys"]);
         assert_eq!(sets(&plan, MAIN_EXE), ["keys"]);
         assert_eq!(plan.key_table.unwrap()[0x2C], 0xD0);
         // The manual's keys said out loud: no patch.

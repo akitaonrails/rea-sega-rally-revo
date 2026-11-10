@@ -666,3 +666,61 @@ Championship → Amateur → AZA Challenge → Safari → car → race.
 Not checked: native Windows, a pad and changed keys at once, a 21:9
 screen in borderless mode.
 
+
+## 2026-11-09 — Windows frame pacing and the black start (Quiver, issues #6, #5)
+
+Headless in the `gaming` distrobox: this branch's `SRRLauncher.exe
+--setup --linux` with Wine 11.21 and DXVK 3.1.1, a throwaway prefix
+under `.work/`, `env -i`, `gamescope --backend headless` 1920x1080 at
+60 Hz, the owner's full rip read-only as `D:`. The attract race (the
+car driving itself) after 30 s, sampled for 60 s from `/proc/<pid>/mem`
+every 0.2 ms: the frame timestamp `0x9E0D08`, the race clock `0x9670D8`
+and the simulation thread's Clock-task sample `0x950930` (one per
+simulation beat). "Stale frame" = a presented frame whose newest
+simulation beat is older than 20 ms (more than one 16 ms step behind).
+
+Windows' default timer cannot be had under Wine, so it was emulated in
+measurement-only copies (never shipped): the simulation thread's
+`Sleep(n)` returns at the first 64 Hz (15.625 ms) boundary at or after
+now + n ms; a 1 ms grid stands for Windows with `timeBeginPeriod(1)`.
+
+| Run (60 s, 3 751 beats, ~3 600 frames each) | beat p50 / p99 / max (ms) | beats > 24 ms | 0 / 1 / 2 beats per frame | stale frames per minute |
+| --- | --- | --- | --- | --- |
+| v0.5.0 under Wine (`pacer`) | 16.84 / 18.76 / 23.1 | 0 | 2.1 / 91.7 / 6.2 % | 1 |
+| v0.5.0, Windows timer emulated | 15.61 / **31.35** / 32.0 | **92 (2.45 %)** | 2.9 / 90.1 / 7.0 % | **62** (35 over 24 ms) |
+| v0.5.0, Windows with a 1 ms timer emulated | 16.00 / 20.97 / 21.3 | 0 | 3.8 / 88.3 / 7.9 % | 15 |
+| `Sleep(1)` + 1 ms timer emulated | 15.80 / 17.80 / 27.4 | 1 | 1.6 / 92.7 / 5.7 % | 0 |
+| **This release (`pacer + timer + video`) under Wine** | 15.92 / 16.97 / 17.2 | 0 | 0.4 / 95.1 / 4.5 % | **0** |
+
+So on current Windows the stutter fix's own beat ran on a 15.6 ms grid
+with a 31 ms gap every ~0.65 s; with the timer set it holds 16 ms within
+about 1 ms everywhere (the residual 2-beat frames are the 62.5 Hz
+simulation under a 60 Hz display, interpolated by the race clock).
+
+- A relay trace (`RelayInclude=winmm.timeBeginPeriod;winmm.timeEndPeriod`)
+  through title → attract race → the game's own quit: v0.5.0 makes
+  **no** call; this release makes one `timeBeginPeriod(1)` from
+  `0x685148` and one `timeEndPeriod(1)` from `0x68515C` per simulation
+  thread, balanced, and the game exits by itself on Yes.
+- Not checked: native Windows itself (the 15.6 ms behaviour is
+  Microsoft's documented `timeBeginPeriod` model since Windows 10 2004),
+  and Championship stage transitions with the timer set.
+
+Black start (issue #5), no input at all for 20–40 s after the game
+process appears:
+
+| Run | frames presented, per 5 s |
+| --- | --- |
+| v0.5.0 in gamescope (Steam Game Mode's path) | 1 frame in 40 s; one Shift press → title, 863 frames in 15 s |
+| v0.5.0 with the logo videos restored | 1 frame in 40 s (Wine's playback stalls too) |
+| v0.5.0 in `explorer /desktop=…` (plain Wine) | 1 frame in 20 s |
+| This release in gamescope | 196, 277, 300, 300: title "PRESS ANY BUTTON" |
+| This release, borderless + keys, in the Wine desktop | 261, 282, 300, 300 |
+
+`winedbg` on the black game: the main thread in `WaitForSingleObject`
+from `0x4DC553` (the video frame wait); slot 0 =
+`.\bootup\video\Rally\SEGA_Logo720p.wmv`, renderer set, end of stream 0;
+Wine's trace: `reader_Open … error 2`, `MediaControl_Run Failed to pause,
+hr 0x80070057`. `SRR_GAME_DIR=… cargo test real_game -- --ignored`:
+every set alone and together (pacer, timer, video, aspect, borderless,
+keys) on the owner's rip.

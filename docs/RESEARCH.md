@@ -187,6 +187,39 @@ and its exit `0x5953CD`, a 38-byte cave at `0x685140`, both WINMM
 imports already in the exe), and polls `Sleep(1)` instead of `Sleep(4)`.
 Measured in `docs/RUNTIME_NOTES.md` (2026-11-09).
 
+## Boot videos: black until a button (issue #5, 2026-11-09)
+
+A Legion Go S player (SteamOS, AppImage) saw a black screen after Play
+until a controller button. Reproduced headless: with no input the game
+presented 1 frame in 40 s; after one key the title ("PRESS ANY BUTTON")
+appeared. The cause is the launcher's own workaround meeting a bug in
+the game's video player:
+
+- The launcher renames the two boot logo videos (hurdle 5 above). The
+  game's player (`Sega_ML_Video_Decoder.cpp`) builds a DirectShow graph
+  per video slot (slots of `0x13C` bytes at `0xABF570`: `+0x11C`
+  `IMediaControl`, `+0x120` `IMediaEvent`, `+0x12C` its renderer,
+  `+0x130` the frame event) and `0x4DC520` reports "still playing" until
+  the renderer's end-of-stream flag (`+0x70`) is set, polling the frame
+  event every 30 ms. Only a button skips it.
+- Under Wine the missing file's graph still builds; `IMediaControl::Run`
+  then fails (`0x80070057`, Wine trace) and the game ignores the result
+  (`0x4DC780`). On Windows a missing file fails earlier and leaves the
+  slot without a frame event. Either way no frame and no end of stream
+  ever come. With the videos in place Wine's playback stalls the same way
+  (the original reason for hurdle 5).
+- Not focus: the game's activation flag (`0x713D88`, from
+  `WM_ACTIVATEAPP`) stays 1 throughout, and giving the window X input
+  focus without an input event changes nothing.
+
+The fix (`patches::VIDEO`, the "video" set, on the launched clean SSE1
+build): a failed `Run` marks the stream ended, and a slot without a
+frame event counts as ended (60-byte cave at `0x685170`). The boot stage
+moves on to the title at once. Videos that can play are untouched.
+NoDVD `SEGA Rally.exe` is not patched (owner decision of 2026-11-09
+covers borderless and keys only): a player launching it still needs one
+button press.
+
 ## Aspect ratio
 
 - The game's renderer carries aspect tables in `.rdata`: two layouts
@@ -449,7 +482,7 @@ Windows Update never installs them.
 | Multi-core affinity | no problem seen on a 16-core 7950X3D |
 | DirectSound3D / EAX | not analysed; sound worked under Wine in the recorded race; native Windows not tried |
 | CD audio | none (music is on disk) |
-| Intro-video codecs | the two WMV logo videos stall Wine's GStreamer path; switched off in the private copy |
+| Intro-video codecs | the two WMV logo videos stall Wine's GStreamer path; switched off in the private copy, and the video set ends a video that cannot play |
 | Resolution and aspect tables | any resolution via config.ini; ultra-wide via the aspect sets |
 | Window losing focus | exclusive fullscreen; under Wine the isolated desktop keeps it contained; not tested on native Windows |
 | Disc check | the SSE1 build avoids it (PCGamingWiki); the NoDVD main build is a supported edition (owner decision) |

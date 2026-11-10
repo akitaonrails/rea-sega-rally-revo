@@ -28,7 +28,7 @@ loading wait is cut out).*
 | The game wants registry entries, a `config.ini` and a Documents folder made by its installer or its settings tool, which misbehaves under Wine | Writes all of them itself, the way the original tool would, and keeps your controller bindings |
 | Exclusive fullscreen crashes on multi-monitor and high-refresh Linux desktops | Runs the game inside its own Wine desktop at the resolution you chose |
 | On hybrid-GPU laptops and desktops the game renders on the integrated GPU and shows a black screen | Makes the game use the discrete GPU |
-| Startup stalls on the logo videos under Wine | Turns the two logo videos off in the private copy |
+| Startup stalls on the logo videos under Wine, or stays black until a button | Turns the two logo videos off in the private copy and makes a video that cannot play end at once |
 | Every race microstutters, and Championship stages after the first judder | Applies the launcher's stutter fix (a clean-room rewrite after stuken's analysis) to the private copy |
 | On Windows the race hitches about once a second | With the stutter fix, gives the game's simulation thread the 1 ms timer it needs (Windows 10 2004+ no longer lends it one) |
 | Frame pacing is uneven | Caps the frame rate at 60 fps, or 120 or off for high-refresh screens (Linux, Wine and Proton) |

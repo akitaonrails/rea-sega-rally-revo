@@ -13,6 +13,8 @@
 //! - [`TIMER`]: with the stutter fix, the simulation thread gets a 1 ms
 //!   timer (`timeBeginPeriod(1)` while it runs) and polls `Sleep(1)`, so
 //!   its 16 ms beat holds on Windows too.
+//! - [`VIDEO`]: a video that cannot play (the boot logos the launcher
+//!   switches off) ends at once instead of waiting for a button.
 //! - The aspect sets: the renderer's 16:9 constant (`39 8E E3 3F`) in its
 //!   two aspect tables becomes 21:9 or 32:9 for ultra-wide resolutions,
 //!   the PCGamingWiki/WSGF hex edit at this build's own offsets.
@@ -473,6 +475,111 @@ pub const TIMER: PatchSet = PatchSet {
     results: &[],
 };
 
+/// The game's video player (`Sega_ML_Video_Decoder.cpp`) waits for a
+/// DirectShow graph to deliver frames: `0x4DC520` polls the slot's frame
+/// event for 30 ms and reports "still playing" until the renderer flags end
+/// of stream (`+0x70`). A video that cannot play never gets there: on
+/// Windows a missing file leaves the slot without a frame event, and under
+/// Wine `IMediaControl::Run` fails (`0x80070057`) and the game ignores it.
+/// The launcher switches the two boot logo videos off, so the boot stage
+/// stayed black until a button skipped it (issue #5). Video slots are
+/// `0x13C` bytes at `0xABF570`; `+0x12C` is the renderer, `+0x130` the frame event.
+const VIDEO_WAIT: u32 = 0x004D_C54A;
+/// `mov eax,[edi+0x130]` before `WaitForSingleObject(frame event, 30)`.
+const VIDEO_WAIT_ORIGINAL: [u8; 6] = [0x8B, 0x87, 0x30, 0x01, 0x00, 0x00];
+/// `xor eax,eax` (end of stream: return 0) and the wait's `push 0x1E`.
+const VIDEO_ENDED: u32 = 0x004D_C542;
+const VIDEO_WAIT_RESUME: u32 = 0x004D_C550;
+/// `0x4DC780` (play slot N): after `IMediaControl::Run`,
+/// `xor ecx,ecx / test eax,eax / setge cl / mov eax,ecx / ret`.
+const VIDEO_RUN: u32 = 0x004D_C79D;
+const VIDEO_RUN_ORIGINAL: [u8; 10] = [0x33, 0xC9, 0x85, 0xC0, 0x0F, 0x9D, 0xC1, 0x8B, 0xC1, 0xC3];
+/// The renderer pointer of video slot 0 (slot N: `+ N * 0x13C`).
+const VIDEO_SLOT_RENDERER: u32 = 0x00AB_F570 + 0x12C;
+/// `.text` slack after the timer cave.
+pub const VIDEO_CAVE: u32 = 0x0068_5170;
+pub const VIDEO_CAVE_LEN: usize = 60;
+/// Where the Run routine starts inside the cave.
+const VIDEO_RUN_AT: usize = 20;
+
+const fn video_wait_patched() -> [u8; 6] {
+    let j = branch(0xE9, VIDEO_WAIT, VIDEO_CAVE);
+    [j[0], j[1], j[2], j[3], j[4], 0x90]
+}
+
+const fn video_run_patched() -> [u8; 10] {
+    let j = branch(0xE9, VIDEO_RUN, VIDEO_CAVE + VIDEO_RUN_AT as u32);
+    [j[0], j[1], j[2], j[3], j[4], 0xCC, 0xCC, 0xCC, 0xCC, 0xCC]
+}
+
+/// The video cave (`docs/RESEARCH.md`, "Boot videos"): the wait (no
+/// frame event: ended) at +0, the Run check at +20.
+const fn video_cave() -> [u8; VIDEO_CAVE_LEN] {
+    let w = VIDEO_WAIT_ORIGINAL;
+    let jz = le(VIDEO_ENDED.wrapping_sub(VIDEO_CAVE + 14));
+    let back = branch(0xE9, VIDEO_CAVE + 14, VIDEO_WAIT_RESUME);
+    let r = le(VIDEO_SLOT_RENDERER);
+    [
+        w[0], w[1], w[2], w[3], w[4], w[5], // mov eax,[edi+0x130]
+        0x85, 0xC0, // test eax,eax
+        0x0F, 0x84, jz[0], jz[1], jz[2], jz[3], // jz 0x4DC542 (ended)
+        back[0], back[1], back[2], back[3], back[4], // jmp 0x4DC550
+        0xCC,    // int3
+        0x85, 0xC0, // +20: test eax,eax (Run's HRESULT)
+        0x7D, 0x1E, // jge .ok
+        0x8B, 0x4C, 0x24, 0x04, // mov ecx,[esp+4] (slot)
+        0x69, 0xC9, 0x3C, 0x01, 0x00, 0x00, // imul ecx,ecx,0x13C
+        0x8B, 0x89, r[0], r[1], r[2], r[3], // mov ecx,[ecx+renderer]
+        0x85, 0xC9, // test ecx,ecx
+        0x74, 0x07, // jz .fail
+        0xC7, 0x41, 0x70, 0x01, 0x00, 0x00, 0x00, // mov dword [ecx+0x70],1
+        0x31, 0xC0, // .fail: xor eax,eax
+        0xC3, // ret
+        0xB8, 0x01, 0x00, 0x00, 0x00, // .ok: mov eax,1
+        0xC3, // ret
+    ]
+}
+
+const ZERO_VIDEO_CAVE: [u8; VIDEO_CAVE_LEN] = [0; VIDEO_CAVE_LEN];
+
+/// Boot videos that cannot play end instead of waiting for a button.
+pub const VIDEO: PatchSet = PatchSet {
+    name: "video",
+    summary: "A video that cannot play ends at once (no black screen until a button)",
+    editions: &[SSE1_CLEAN],
+    sites: &[
+        PatchSite {
+            at: At::Va(VIDEO_WAIT),
+            original: &VIDEO_WAIT_ORIGINAL,
+            patched: &video_wait_patched(),
+            note: "video frame wait: a slot without a frame event has ended",
+        },
+        PatchSite {
+            at: At::Va(VIDEO_RUN),
+            original: &VIDEO_RUN_ORIGINAL,
+            patched: &video_run_patched(),
+            note: "video Run: when IMediaControl::Run fails the stream is marked ended",
+        },
+        PatchSite {
+            at: At::Va(VIDEO_CAVE),
+            original: &ZERO_VIDEO_CAVE,
+            patched: &video_cave(),
+            note: "video cave: the two checks",
+        },
+    ],
+    caves: &[PatchCave {
+        name: "video",
+        at: At::Va(VIDEO_CAVE),
+        len: VIDEO_CAVE_LEN,
+    }],
+    results: &[],
+};
+
+/// The video set for a build, `None` for a build without one.
+pub fn video_set(build: [u8; 32]) -> Option<&'static PatchSet> {
+    (build == SSE1_CLEAN).then_some(&VIDEO)
+}
+
 /// The addresses and the two sets of a build that has them.
 fn build_of(build: [u8; 32]) -> Option<(&'static Build, &'static PatchSet, &'static PatchSet)> {
     if build == SSE1_CLEAN {
@@ -500,9 +607,10 @@ pub fn keys_set(build: [u8; 32]) -> Option<&'static PatchSet> {
 }
 
 /// Every set, for docs and the real-game test.
-pub const ALL: [&PatchSet; 10] = [
+pub const ALL: [&PatchSet; 11] = [
     &PACER,
     &TIMER,
+    &VIDEO,
     &ASPECT_21_SSE1,
     &ASPECT_32_SSE1,
     &ASPECT_21_MAIN,
@@ -770,6 +878,61 @@ mod tests {
     }
 
     #[test]
+    fn the_video_set_ends_a_boot_video_that_cannot_play() {
+        // Issue #5: black until a button. The launcher switches the logo
+        // videos off; the game's player then waits for frames forever.
+        assert_eq!(VIDEO.name, "video");
+        assert_eq!(VIDEO.editions, &[SSE1_CLEAN]);
+        assert_eq!(video_set(SSE1_CLEAN), Some(&VIDEO));
+        assert_eq!(video_set(SSE1_PACER), None);
+        assert_eq!(video_set(MAIN_NODVD), None);
+        let site = |va: u32| {
+            VIDEO
+                .sites
+                .iter()
+                .find(|s| s.at == At::Va(va))
+                .unwrap_or_else(|| panic!("no site at {va:#x}"))
+        };
+        let cave = site(VIDEO_CAVE).patched;
+        assert_eq!(cave.len(), VIDEO_CAVE_LEN);
+        // The frame wait: no frame event (the file never opened) is the end.
+        let wait = site(0x004D_C54A);
+        assert_eq!(wait.original, &[0x8B, 0x87, 0x30, 0x01, 0x00, 0x00]);
+        assert_eq!(target(wait.patched, 0x004D_C54A), VIDEO_CAVE);
+        assert_eq!(
+            &cave[..8],
+            &[0x8B, 0x87, 0x30, 0x01, 0x00, 0x00, 0x85, 0xC0]
+        );
+        assert_eq!(&cave[8..10], &[0x0F, 0x84]);
+        let rel = i32::from_le_bytes(cave[10..14].try_into().unwrap());
+        assert_eq!((VIDEO_CAVE + 14).wrapping_add(rel as u32), 0x004D_C542);
+        assert_eq!(target(&cave[14..], VIDEO_CAVE + 14), 0x004D_C550);
+        // IMediaControl::Run failing marks the stream ended.
+        let run = site(0x004D_C79D);
+        assert_eq!(
+            run.original,
+            &[0x33, 0xC9, 0x85, 0xC0, 0x0F, 0x9D, 0xC1, 0x8B, 0xC1, 0xC3]
+        );
+        let at = target(run.patched, 0x004D_C79D);
+        let off = (at - VIDEO_CAVE) as usize;
+        // mov ecx,[ecx+slot.renderer]; ...; mov dword [ecx+0x70],1
+        assert!(
+            cave[off..]
+                .windows(6)
+                .any(|w| w == [0x8B, 0x89, 0x9C, 0xF6, 0xAB, 0x00])
+        );
+        assert!(
+            cave[off..]
+                .windows(7)
+                .any(|w| w == [0xC7, 0x41, 0x70, 1, 0, 0, 0])
+        );
+        // After the timer cave, before the window cave.
+        assert!(VIDEO_CAVE >= TIMER_CAVE + TIMER_CAVE_LEN as u32);
+        assert!(VIDEO_CAVE + VIDEO_CAVE_LEN as u32 <= SSE1.window_cave);
+        assert!(ALL.contains(&&VIDEO));
+    }
+
+    #[test]
     fn the_site_table_describes_itself() {
         let rows = patch::describe(&ASPECT_21_SSE1, None).unwrap();
         let table = patch::to_markdown(&rows);
@@ -793,6 +956,7 @@ mod tests {
             &[
                 &PACER,
                 &TIMER,
+                &VIDEO,
                 &ASPECT_21_SSE1,
                 &BORDERLESS_SSE1,
                 &KEYS_SSE1,
