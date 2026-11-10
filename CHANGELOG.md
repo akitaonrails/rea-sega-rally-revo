@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.5.1 - 2026-11-09
+
 - **Steadier frame pacing on Windows** (Quiver player feedback, issue #6):
   the game's simulation thread waits for its 16 ms beat with `Sleep(4)`,
   and since Windows 10 2004 that sleep lasts a whole 15.6 ms timer tick
