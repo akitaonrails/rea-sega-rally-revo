@@ -724,3 +724,48 @@ Wine's trace: `reader_Open … error 2`, `MediaControl_Run Failed to pause,
 hr 0x80070057`. `SRR_GAME_DIR=… cargo test real_game -- --ignored`:
 every set alone and together (pacer, timer, video, aspect, borderless,
 keys) on the owner's rip.
+
+## 2026-11-10 — the game's key from HKCU (SDK v0.6.0, `REA_REGISTRY`)
+
+Why: both exes read `language` and `sku` from
+`HKLM\SOFTWARE\SEGA\SEGA Rally` and carry an `asInvoker` manifest, so the
+VirtualStore copy an unelevated launcher's write lands in never reaches
+them: on native Windows without admin rights the Language option was
+always ignored (same bug class as akitaonrails/rea-colin-mcrae#6). Now the
+launcher writes `HKCU\Software\Sega\SEGA Rally`, reads it back, and the
+runtime copies import the SDK's `rea_close_hook.dll`, whose `REA_REGISTRY`
+rule sends the game's open there (no `REA_CLOSE_HOOK_ATTACH`: the DLL does
+nothing else).
+
+Headless in the `gaming` distrobox: this branch's release `SRRLauncher.exe`
+and `rea_close_hook.dll` with the pinned DXVK 3.1.1, Wine 11.21, `env -i`,
+`gamescope --backend headless` 1920x1080, the owner's full rip read-only
+as `D:\game`, the private copy at `R:\runtime` (filled once from a
+throwaway prefix), every run in a **new** prefix under `.work/`. Keys read
+with `wine reg query` in both views (`/reg:32`, `/reg:64`): `HKLM\Software\Sega\SEGA Rally`,
+`HKCU\Software\Sega\SEGA Rally` and both VirtualStore spellings. Input:
+XTest Return presses.
+
+| Run | Before | Result |
+| --- | --- | --- |
+| Play, `--no-window --linux --language german` (gamescope, SSE1 with pacer + timer + video + the import) | no key anywhere | VERIFIED: title "BELIEBIGE TASTE DRÜCKEN", then the German brightness prompt ("Helligkeit", Ja/Nein). Afterwards only `HKCU\Software\Sega\SEGA Rally` exists: `language=German`, `sku=Europe`; HKLM and the VirtualStore still empty |
+| Control: the same runtime `SEGA Rally_SSE1.exe` started directly, no `REA_REGISTRY` | HKCU German, nothing in HKLM | the old failure: title in English ("PRESS ANY BUTTON"); after leaving the title the game ends by itself (exit code 1, no exception in a `+seh` trace) |
+| Carry-over: Play with no `--language` | new prefix: `HKLM` (32-bit view) `French`, VirtualStore `Italian` (an earlier release's unelevated write) | VERIFIED: Italian ("PREMI QUALSIASI TASTO", "Luminosità"); `HKCU` gets `language=Italian`, `sku=Europe`; the old keys are only read |
+| Plain-Wine path (`explorer /desktop=SegaRally,…`), `--language french` over the German value | HKCU German | VERIFIED: the French main menu ("Championnat", "sélectionner / retour"); HKCU `French` |
+| NoDVD `SEGA Rally.exe`, `--stutter-fix off --language spanish` | HKCU French | VERIFIED: "PRESIONA CUALQUIER BOTÓN" |
+| `--check --linux` | — | "Ready to play … The game's language: HKCU\Software\Sega\SEGA Rally", exit 0; without the DLL next to the launcher: "Not ready to play. rea_close_hook.dll is missing …", exit 1 |
+| `--setup` without the DLL | — | stops: "rea_close_hook.dll is missing. Keep it next to SRRLauncher.exe …", exit 1 |
+
+Both exes stamp every import descriptor bound (`0xFFFFFFFF`) with no
+bound import directory, and USER32, ADVAPI32, SHELL32 and ole32 have no
+name table; SDK v0.6.0's `import_into` refuses that (`BoundWithoutNames`).
+`registry::with_hook` clears the stale stamps first (their address tables
+hold name RVAs; the loader already treats them as unbound) until the SDK
+accepts them. `SRR_GAME_DIR=… cargo test real_game -- --include-ignored`:
+the import goes into both real exes after every patch set a launch
+applies, only the descriptors' stamp fields change in the game's sections,
+and a second pass is unchanged. `sdk/scripts/wine-test`: the values land
+in HKCU, an HKLM value is carried over and HKLM is never written.
+
+Pending: native Windows, unelevated (the language applies; no admin
+prompt), and Proton.
