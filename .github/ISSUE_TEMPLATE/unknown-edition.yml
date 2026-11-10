@@ -7,14 +7,18 @@ body:
     attributes:
       value: |
         The launcher only changes builds it has identified by SHA-256, so it refused yours and
-        left it untouched. Tell us about your copy and we will add it. Never attach game files.
+        left it untouched. Tell us about your copy: a build we can verify is added. Some builds
+        need a fix written for that exact file, so we may ask more about your copy first.
+        Never attach or link game files.
   - type: textarea
     id: sha256
     attributes:
       label: SHA-256
       description: |
-        The 64-character SHA-256 the launcher showed, and which file it was (SEGA Rally.exe or
-        SEGA Rally_SSE1.exe). launcher.log has a line for each.
+        The SHA-256 the launcher showed, and which file it was (SEGA Rally.exe or
+        SEGA Rally_SSE1.exe); launcher.log has a line for each. A SHA-256 is 64 characters,
+        digits 0-9 and letters a-f. Or run `sha256sum "SEGA Rally.exe"` (Linux) or
+        `certutil -hashfile "SEGA Rally.exe" SHA256` (Windows).
       render: text
     validations:
       required: true
@@ -30,10 +34,17 @@ body:
     validations:
       required: true
   - type: input
+    id: size
+    attributes:
+      label: File size in bytes
+      description: >-
+        Of the file named above: Properties on Windows, or `stat -c %s "SEGA Rally.exe"` on
+        Linux.
+  - type: input
     id: details
     attributes:
       label: Version, language and patches
-      description: e.g. "v4.0.6.0, English, no patches". The file's size in bytes helps too.
+      description: e.g. "v4.0.6.0, English, no patches".
   - type: input
     id: version
     attributes:
