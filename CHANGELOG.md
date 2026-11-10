@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.6.1 - 2026-11-10
+
 - Updated rea-launcher-sdk to v0.7.0, which now adds `rea_close_hook.dll`
   to both game exes itself; the launcher's own workaround for their stale
   import binding is gone. Nothing changes for players: the private copies
