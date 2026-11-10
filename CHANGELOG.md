@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.6.0 - 2026-11-10
+
 - **Your language choice now works on Windows without administrator
   rights.** The game reads its language from `HKLM`, which a launcher
   without admin rights can't write; Windows put the launcher's value in
