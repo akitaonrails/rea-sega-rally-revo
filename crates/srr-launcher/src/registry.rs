@@ -88,79 +88,12 @@ pub fn describe(values: &[Value]) -> String {
 
 /// The runtime copy of a game exe (`bytes`: the player's, patched) with the
 /// close hook DLL in its import table, so Windows loads it with the game.
-/// Unchanged when the import is already there.
+/// Unchanged when the import is already there. Both game exes mark every
+/// import descriptor bound with no bound import directory; the SDK clears
+/// that stale binding (time stamp and forwarder chain) as it adds the import.
 pub fn with_hook(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    rea_close_hook::import_into(&clear_stale_binding(bytes))
+    rea_close_hook::import_into(bytes)
         .map_err(|error| format!("{HOOK_DLL} can't be added to its import table ({error})"))
-}
-
-/// Both game exes mark every import descriptor bound (time stamp
-/// `0xFFFFFFFF`) yet have no bound import directory, and four of them
-/// (USER32, ADVAPI32, SHELL32, ole32) have no name table: their address
-/// table still holds the name RVAs, so the loader resolves them as unbound
-/// (it trusts a stamp only with that directory). SDK v0.6.0's
-/// `pe::edit::add_import` refuses such a descriptor
-/// (`BoundWithoutNames`); this clears the stale stamp and forwarder chain,
-/// which changes nothing the loader does. Only for PE32 images without a
-/// bound import directory whose address tables hold names or ordinals;
-/// anything else is returned as it is, for the SDK to judge. Local until
-/// the SDK accepts stale bindings itself.
-fn clear_stale_binding(bytes: &[u8]) -> Vec<u8> {
-    use rea_launcher::pe::{Format, Pe};
-    let mut out = bytes.to_vec();
-    let Ok(pe) = Pe::parse(bytes) else {
-        return out;
-    };
-    if pe.format != Format::Pe32 {
-        return out;
-    }
-    let u32_at = |at: usize| {
-        bytes
-            .get(at..at + 4)
-            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-    };
-    let offset = |rva: u32| pe.va_to_offset(pe.image_base + u64::from(rva));
-    let Some(directories) = u32_at(0x3C).map(|nt| nt as usize + 24 + 96) else {
-        return out;
-    };
-    let (Some(imports), Some(0)) = (u32_at(directories + 8), u32_at(directories + 88)) else {
-        return out;
-    };
-    let Some(start) = offset(imports) else {
-        return out;
-    };
-    for at in (start..).step_by(20) {
-        let Some(entry) = bytes.get(at..at + 20) else {
-            break;
-        };
-        if entry.iter().all(|&b| b == 0) {
-            break;
-        }
-        let field = |i: usize| u32::from_le_bytes(entry[i..i + 4].try_into().unwrap());
-        let (names, stamp, slots) = (field(0), field(4), field(16));
-        if names != 0 || stamp == 0 {
-            continue;
-        }
-        let Some(table) = offset(slots) else {
-            return bytes.to_vec();
-        };
-        // Names (an RVA of a hint/name entry in the file) or ordinals,
-        // never bound addresses.
-        let unbound = (table..)
-            .step_by(4)
-            .map(u32_at)
-            .take_while(|thunk| *thunk != Some(0))
-            .all(|thunk| {
-                thunk.is_some_and(|t| {
-                    t & 0x8000_0000 != 0 || offset(t).is_some_and(|o| o < bytes.len())
-                })
-            });
-        if !unbound {
-            return bytes.to_vec();
-        }
-        out[at + 4..at + 12].fill(0);
-    }
-    out
 }
 
 /// Why the game would not see its key, for `--check`: the DLL isn't next to
@@ -374,8 +307,6 @@ mod tests {
     #[test]
     fn a_stale_binding_like_the_games_takes_the_import() {
         let image = stale_bound_image(0x1060);
-        // SDK v0.6.0 alone refuses it (BoundWithoutNames).
-        assert!(rea_close_hook::import_into(&image).is_err());
         let hooked = with_hook(&image).unwrap();
         let imports = rea_launcher::pe::edit::imports(&hooked).unwrap();
         let dlls: Vec<&str> = imports.iter().map(|i| i.dll.as_str()).collect();
@@ -383,7 +314,6 @@ mod tests {
         assert_eq!(imports[0].functions.len(), 1);
         // A table of bound addresses is not ours to unbind: refused.
         let bound = stale_bound_image(0x7700_1234);
-        assert_eq!(clear_stale_binding(&bound), bound);
         assert!(with_hook(&bound).is_err());
     }
 

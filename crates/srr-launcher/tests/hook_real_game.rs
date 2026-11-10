@@ -69,7 +69,8 @@ fn real_game_exes_take_the_hook_import_after_every_patch_set() {
                 assert!(imports.contains(&import), "{name}: {import:?}");
             }
             // Inside the game's sections only the import descriptors' stale
-            // time stamps and forwarder chains change (`clear_stale_binding`).
+            // time stamps and forwarder chains change (the SDK clears the stale
+            // binding).
             let (before, after) = (Pe::parse(&patched).unwrap(), Pe::parse(&hooked).unwrap());
             let descriptors = import_descriptors(&patched);
             for section in &before.sections {
