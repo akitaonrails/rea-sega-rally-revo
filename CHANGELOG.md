@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Replaced placeholder launcher icon with custom high-contrast 256×256 SEGA Rally Revo jungle-mud artwork for Windows executable and Linux AppImage shortcuts.
+
 ## v0.6.1 - 2026-11-10
 
 - Updated rea-launcher-sdk to v0.7.0, which now adds `rea_close_hook.dll`
