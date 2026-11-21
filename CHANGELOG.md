@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.6.2 - 2026-11-21
+
 ### Changed
 
 - Replaced placeholder launcher icon with custom high-contrast 256×256 SEGA Rally Revo jungle-mud artwork for Windows executable and Linux AppImage shortcuts.
