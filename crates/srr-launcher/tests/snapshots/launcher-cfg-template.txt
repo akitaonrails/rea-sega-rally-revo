@@ -36,6 +36,10 @@
 # Values: normal, high or ultra.
 #quality =
 
+# Multisample anti-aliasing (MSAA) in config.ini. Off is the safest default.
+# Values: off, 2x, 4x or 8x.
+#anti_aliasing =
+
 # Waits for the screen's refresh: no tearing. Off can tear on screens above
 # 60 Hz.
 # Values: on or off.

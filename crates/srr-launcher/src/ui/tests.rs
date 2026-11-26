@@ -432,6 +432,11 @@ fn display_mode_and_keys_reach_the_saved_file() {
         ui.state().form.display_mode,
         srr_launcher::config::DisplayMode::Borderless
     );
+    click(&mut ui, "4x MSAA");
+    assert_eq!(
+        ui.state().form.anti_aliasing,
+        srr_launcher::config::AntiAliasing::X4
+    );
     tab(&mut ui, "Controls");
     assert!(
         ui.query_by_label_contains("Accelerate: A, Brake / reverse: Z")
@@ -454,6 +459,7 @@ fn display_mode_and_keys_reach_the_saved_file() {
     );
     let saved = ui.state().form.save("", None);
     assert!(saved.contains("display_mode = borderless"), "{saved}");
+    assert!(saved.contains("anti_aliasing = 4x"), "{saved}");
     assert!(saved.contains("keys = accelerate=up"), "{saved}");
     // Two actions on one key: said in place, in the window's words.
     ui.state_mut().form.keys = "accelerate=z".into();

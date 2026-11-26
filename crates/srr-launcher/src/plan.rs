@@ -121,6 +121,7 @@ pub fn plan(settings: &Settings, editions: &GameEditions, env: &Env) -> Plan {
     let graphics = Graphics {
         resolution: settings.resolution.map(|_| effective),
         quality: settings.quality,
+        anti_aliasing: settings.anti_aliasing,
         vsync: settings.vsync,
     };
     let seed = (
@@ -583,6 +584,9 @@ mod tests {
             }),
             ("quality", &["--quality", "normal"], |p, _| {
                 p.graphics.quality == Some(Quality::Normal)
+            }),
+            ("anti_aliasing", &["--anti-aliasing", "4x"], |p, _| {
+                p.graphics.anti_aliasing == Some(crate::config::AntiAliasing::X4)
             }),
             ("vsync", &["--vsync", "off"], |p, _| {
                 p.graphics.vsync == Some(false)

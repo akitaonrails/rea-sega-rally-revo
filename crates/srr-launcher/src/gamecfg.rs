@@ -19,7 +19,7 @@
 use rea_launcher::ini::{self, Ini, Owned};
 use rea_launcher::wine;
 
-use crate::config::Quality;
+use crate::config::{AntiAliasing, Quality};
 
 /// The per-feature values of each preset. The game's own quality scale is
 /// LOWEST=0, LOW=1, NORMAL=2, HIGH=3 (from the original settings
@@ -184,6 +184,7 @@ pub fn with_rumble(current: Option<&str>, on: bool) -> (String, RumbleEdit) {
 pub struct Graphics {
     pub resolution: Option<(u32, u32)>,
     pub quality: Option<Quality>,
+    pub anti_aliasing: Option<AntiAliasing>,
     pub vsync: Option<bool>,
 }
 
@@ -200,6 +201,13 @@ fn owned_keys(graphics: &Graphics) -> Vec<(&'static str, Option<String>)> {
         "VerticalResolution",
         resolution.map(|(_, height)| height.to_string()),
     ));
+    let aa = graphics.anti_aliasing.map(AntiAliasing::config_values);
+    keys.push((
+        "AntiAliasingLevel",
+        aa.map(|(level, _, _)| level.to_string()),
+    ));
+    keys.push(("MultisampleType", aa.map(|(_, ms, _)| ms.to_string())));
+    keys.push(("MultisampleQuality", aa.map(|(_, _, q)| q.to_string())));
     let values = graphics.quality.map(quality_values);
     for (i, key) in QUALITY_KEYS.into_iter().enumerate() {
         keys.push((key, values.map(|values| values.0[i].to_string())));
@@ -393,8 +401,30 @@ mod tests {
     const ALL_SET: Graphics = Graphics {
         resolution: Some((2560, 1440)),
         quality: Some(Quality::High),
+        anti_aliasing: None,
         vsync: Some(true),
     };
+
+    #[test]
+    fn anti_aliasing_writes_and_releases_msaa_keys() {
+        let mut owned = Owned::default();
+        let existing = seed_config((1920, 1080), Quality::High, true);
+        let with_4x = update(
+            &existing,
+            &Graphics {
+                anti_aliasing: Some(AntiAliasing::X4),
+                ..Graphics::default()
+            },
+            &mut owned,
+        );
+        assert!(with_4x.contains("AntiAliasingLevel=2\n"), "{with_4x}");
+        assert!(with_4x.contains("MultisampleType=4\n"), "{with_4x}");
+        assert!(with_4x.contains("MultisampleQuality=0\n"), "{with_4x}");
+
+        let released = update(&with_4x, &Graphics::default(), &mut owned);
+        assert!(released.contains("AntiAliasingLevel=0\n"), "{released}");
+        assert!(released.contains("MultisampleType=0\n"), "{released}");
+    }
 
     fn update(existing: &str, graphics: &Graphics, owned: &mut Owned) -> String {
         let seed = ((1920, 1080), Quality::High, true);

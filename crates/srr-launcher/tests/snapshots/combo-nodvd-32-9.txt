@@ -18,6 +18,7 @@ Settings {
     quality: Some(
         Normal,
     ),
+    anti_aliasing: None,
     vsync: Some(
         true,
     ),

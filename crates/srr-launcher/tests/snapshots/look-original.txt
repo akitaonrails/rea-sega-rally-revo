@@ -20,6 +20,9 @@ Settings {
     quality: Some(
         Normal,
     ),
+    anti_aliasing: Some(
+        Off,
+    ),
     vsync: Some(
         true,
     ),
@@ -125,6 +128,9 @@ VerticalResolution=720\r
 GraphicQuality=2\r
 VSync=1\r
 RunWindowed=0\r
+AntiAliasingLevel=0\r
+MultisampleType=0\r
+MultisampleQuality=0\r
 ShadowQuality=2\r
 ReflectionQuality=2\r
 TrackQuality=2\r

@@ -8,6 +8,7 @@ SRRLauncher [options]
   --resolution <WxH>                                       Resolution
   --display-mode fullscreen|borderless                     Display mode
   --quality normal|high|ultra                              Quality
+  --anti-aliasing off|2x|4x|8x                             Anti-aliasing
   --vsync on|off                                           Vsync
   --frame-limit 60|120|off                                 Frame limit
   --stutter-fix on|off                                     Stutter fix

@@ -5,7 +5,7 @@ use rea_launcher::cfg::{self, spec};
 pub use rea_launcher::display::STEAM_DECK_SCREEN;
 
 pub use crate::config::Look;
-use crate::config::{self, DisplayMode, FrameLimit, Quality, Settings};
+use crate::config::{self, AntiAliasing, DisplayMode, FrameLimit, Quality, Settings};
 
 /// The picture values a look sets; `resolution: None` is Auto (the
 /// screen's size).
@@ -52,6 +52,7 @@ pub struct Form {
     /// and Custom stays selected while the player edits.
     pub look: Look,
     pub frame_limit: FrameLimit,
+    pub anti_aliasing: AntiAliasing,
     pub stutter_fix: bool,
     pub rumble: bool,
     pub display_mode: DisplayMode,
@@ -76,6 +77,7 @@ impl Form {
             look: Form::look_of(&picture, screen),
             picture,
             frame_limit: settings.effective_frame_limit(),
+            anti_aliasing: settings.effective_anti_aliasing(),
             stutter_fix: settings.effective_stutter_fix(),
             rumble: settings.effective_rumble(),
             display_mode: settings.effective_display_mode(),
@@ -156,6 +158,7 @@ impl Form {
             ("look", self.look.key().to_string()),
             ("resolution", format!("{width}x{height}")),
             ("quality", picture.quality.key().to_string()),
+            ("anti_aliasing", self.anti_aliasing.key().to_string()),
             ("vsync", cfg::on_off(picture.vsync).to_string()),
             ("frame_limit", self.frame_limit.key().to_string()),
             ("stutter_fix", cfg::on_off(self.stutter_fix).to_string()),

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v0.6.3 - 2026-11-26
+
+### Added
+
+- **Anti-aliasing (MSAA) option (`anti_aliasing` / `--anti-aliasing` / `--msaa`)**:
+  added `Off`, `2x MSAA`, `4x MSAA`, and `8x MSAA` choices in the Picture tab
+  and CLI/config, writing `AntiAliasingLevel`, `MultisampleType`, and
+  `MultisampleQuality` to `config.ini` when set (and preserving manual edits
+  when unset) (#7).
+
 ## v0.6.2 - 2026-11-21
 
 ### Changed

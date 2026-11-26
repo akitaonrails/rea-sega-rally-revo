@@ -76,6 +76,51 @@ impl Quality {
     }
 }
 
+/// Multisample anti-aliasing (MSAA) written to `[Graphics]` in `config.ini`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AntiAliasing {
+    #[default]
+    Off,
+    X2,
+    X4,
+    X8,
+}
+
+impl AntiAliasing {
+    pub const ALL: [AntiAliasing; 4] = [
+        AntiAliasing::Off,
+        AntiAliasing::X2,
+        AntiAliasing::X4,
+        AntiAliasing::X8,
+    ];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            AntiAliasing::Off => "off",
+            AntiAliasing::X2 => "2x",
+            AntiAliasing::X4 => "4x",
+            AntiAliasing::X8 => "8x",
+        }
+    }
+
+    /// `(AntiAliasingLevel, MultisampleType, MultisampleQuality)` for `config.ini`.
+    pub fn config_values(self) -> (u32, u32, u32) {
+        match self {
+            AntiAliasing::Off => (0, 0, 0),
+            AntiAliasing::X2 => (1, 2, 0),
+            AntiAliasing::X4 => (2, 4, 0),
+            AntiAliasing::X8 => (3, 8, 0),
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<AntiAliasing> {
+        let trimmed = value.trim();
+        AntiAliasing::ALL
+            .into_iter()
+            .find(|aa| aa.key().eq_ignore_ascii_case(trimmed))
+    }
+}
+
 /// DXVK-side frame limiter. The community Lutris setup ships
 /// How the game takes the screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,6 +258,12 @@ const LOOKS: &[(&str, &str)] = &[
     ("custom", "Custom"),
 ];
 const QUALITIES: &[(&str, &str)] = &[("normal", "Normal"), ("high", "High"), ("ultra", "Ultra")];
+const ANTI_ALIASING: &[(&str, &str)] = &[
+    ("off", "Off"),
+    ("2x", "2x MSAA"),
+    ("4x", "4x MSAA"),
+    ("8x", "8x MSAA"),
+];
 const DISPLAY_MODES: &[(&str, &str)] =
     &[("fullscreen", "Fullscreen"), ("borderless", "Borderless")];
 const FRAME_LIMITS: &[(&str, &str)] = &[("60", "60 fps"), ("120", "120 fps"), ("off", "Off")];
@@ -273,6 +324,13 @@ pub const OPTIONS: &[OptionSpec] = &[
         "Quality",
         "The game's detail preset: Normal is the 2007 look, High sharper shadows and track detail, Ultra every slider at maximum.",
     ),
+    OptionSpec::new(
+        "anti_aliasing",
+        Kind::Choice(ANTI_ALIASING),
+        "Anti-aliasing",
+        "Multisample anti-aliasing (MSAA) in config.ini. Off is the safest default.",
+    )
+    .with_aliases(&["anti-aliasing", "msaa"]),
     OptionSpec::new(
         "vsync",
         Kind::Toggle,
@@ -407,6 +465,7 @@ pub struct Settings {
     /// `Some(None)` is `auto` said out loud; `None` is unset.
     pub resolution: Option<Option<(u32, u32)>>,
     pub quality: Option<Quality>,
+    pub anti_aliasing: Option<AntiAliasing>,
     pub vsync: Option<bool>,
     pub frame_limit: Option<FrameLimit>,
     pub stutter_fix: Option<bool>,
@@ -521,6 +580,7 @@ impl Settings {
             }
             ("resolution", Value::Size(_)) => self.resolution = Some(None),
             ("quality", Value::Choice(quality)) => self.quality = Quality::parse(quality),
+            ("anti_aliasing", Value::Choice(aa)) => self.anti_aliasing = AntiAliasing::parse(aa),
             ("vsync", Value::Toggle(on)) => self.vsync = Some(on),
             ("frame_limit", Value::Choice(limit)) => self.frame_limit = FrameLimit::parse(limit),
             ("stutter_fix", Value::Toggle(on)) => self.stutter_fix = Some(on),
@@ -575,6 +635,7 @@ impl Settings {
             look: over.look.or(base.look),
             resolution: over.resolution.or(base.resolution),
             quality: over.quality.or(base.quality),
+            anti_aliasing: over.anti_aliasing.or(base.anti_aliasing),
             vsync: over.vsync.or(base.vsync),
             frame_limit: over.frame_limit.or(base.frame_limit),
             stutter_fix: over.stutter_fix.or(base.stutter_fix),
@@ -593,6 +654,10 @@ impl Settings {
 
     pub fn effective_quality(&self) -> Quality {
         self.quality.unwrap_or(Quality::High)
+    }
+
+    pub fn effective_anti_aliasing(&self) -> AntiAliasing {
+        self.anti_aliasing.unwrap_or(AntiAliasing::Off)
     }
 
     pub fn effective_vsync(&self) -> bool {

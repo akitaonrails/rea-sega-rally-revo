@@ -20,6 +20,9 @@ Settings {
     quality: Some(
         High,
     ),
+    anti_aliasing: Some(
+        Off,
+    ),
     vsync: Some(
         true,
     ),

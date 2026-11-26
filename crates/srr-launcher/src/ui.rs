@@ -16,7 +16,7 @@ use rea_launcher_ui::spec::{RowOptions, mark_rendered, spec_row_with};
 use rea_launcher_ui::theme::{body, decal, semibold};
 use rea_launcher_ui::widgets::{self, Crop, LookCard};
 use rea_launcher_ui::window::Layout;
-use srr_launcher::config::{self, Aspect, DisplayMode, FrameLimit, KeyMap, Quality};
+use srr_launcher::config::{self, AntiAliasing, Aspect, DisplayMode, FrameLimit, KeyMap, Quality};
 use srr_launcher::directx;
 use srr_launcher::edition::{self, GameEditions};
 use srr_launcher::form::{self, Form, Look, Picture};
@@ -569,7 +569,12 @@ impl Window {
             ui.add_space(rea_launcher_ui::theme::metrics(ui.ctx()).field_width);
             ui.label(egui::RichText::new(outcome).font(body(14.0)).color(ORANGE));
         });
-        ui.add_space(12.0);
+        if let Some(text) = table_row(ui, "display_mode", self.form.display_mode.key(), None)
+            && let Some(mode) = DisplayMode::parse(&text)
+        {
+            self.form.display_mode = mode;
+        }
+        ui.add_space(4.0);
 
         widgets::heading(ui, "Detail");
         if let Some(text) = table_row(ui, "quality", picture.quality.key(), None)
@@ -580,10 +585,10 @@ impl Window {
         if let Some(text) = table_row(ui, "vsync", cfg::on_off(picture.vsync), None) {
             picture.vsync = text == cfg::on_off(true);
         }
-        if let Some(text) = table_row(ui, "display_mode", self.form.display_mode.key(), None)
-            && let Some(mode) = DisplayMode::parse(&text)
+        if let Some(text) = table_row(ui, "anti_aliasing", self.form.anti_aliasing.key(), None)
+            && let Some(aa) = AntiAliasing::parse(&text)
         {
-            self.form.display_mode = mode;
+            self.form.anti_aliasing = aa;
         }
         self.form.edit_picture(picture, screen);
     }
